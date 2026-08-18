@@ -5,7 +5,7 @@ Shared business-development pipeline board for KKN Law LLP partners — prospect
 ## 1. Set up Supabase
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
-2. Open **SQL Editor → New query**, paste in the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the `kkn_kv` table, the access policy, and seeds the default partner list.
+2. Open **SQL Editor → New query**, paste in the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the `kkn_kv` table, the access policy, and seeds the default partner list plus the two prospects (Safaricom Ltd, Azelis Kenya) that were already logged in the original artifact — see "Seeded data" below.
 3. Go to **Project Settings → API** and copy the **Project URL** and the **anon / public** key.
 
 ## 2. Configure the app
@@ -36,6 +36,25 @@ Open the printed local URL. Pick a partner, add a prospect, and confirm it persi
 2. In Vercel: **New Project → Import** the repo. Vercel auto-detects Vite.
 3. Before the first deploy, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under **Project Settings → Environment Variables** (same values as `.env.local`).
 4. Deploy. Share the resulting URL with the partners.
+
+## Seeded data
+
+I checked the original artifact for existing data before migrating it (as Gerald Kiti, the only partner with anything logged). Here's exactly what was there — everything else (referrals, clients, tenders, activity log, tender vault) was empty:
+
+| Field | Safaricom Ltd | Azelis Kenya |
+|---|---|---|
+| Contact | Cecil Marie, Head of business | Omondi, COO |
+| Sector | Telecommunication | Manufacturing of paint |
+| Practice area | Technology | Tax |
+| Opportunity | Handling their cyber security issues | Handling their tax matters (advisory and litigation) |
+| Estimated fee | KES 1,000,000 | KES 300,000 |
+| Source | Referral | Partner introduction |
+| Relationship strength | Warm | Warm |
+| Probability | 25% | 50% |
+| Stage | 1. Target | 7. Negotiation |
+| Next action | Prepare cyber security deck (due 24 Aug 2026) | Generate the fee note and list of offerings (due 23 Aug 2026) |
+
+Both are owned by Gerald Kiti. One caveat: the artifact tracks a full stage-by-stage status history per prospect (Azelis had 6 logged entries), and that history wasn't practical to fully extract through the read-only preview — `schema.sql` seeds each prospect with just one history entry for its current stage. The prospects themselves are complete and accurate; only the older history entries are missing.
 
 ## How storage works
 
