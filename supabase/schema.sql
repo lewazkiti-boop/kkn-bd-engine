@@ -7,19 +7,19 @@ create table if not exists kkn_kv (
   updated_at  timestamptz not null default now()
 );
 
--- Row Level Security: the app has no login screen (partners just pick their
--- name), so it authenticates with Supabase's public "anon" key and relies on
--- the link/URL itself being private to the firm. This policy allows that key
--- to read and write every row. If you later add real partner authentication,
--- tighten this policy accordingly.
+-- Row Level Security: the app now requires magic-link sign-in (Supabase Auth),
+-- so only requests carrying a valid logged-in session may read/write. Anyone
+-- can request a magic link for now (no email allowlist/domain restriction) —
+-- see README for how to tighten this to specific partner emails later.
 alter table kkn_kv enable row level security;
 
 drop policy if exists "Allow anon read/write on kkn_kv" on kkn_kv;
-create policy "Allow anon read/write on kkn_kv"
+drop policy if exists "Allow authenticated read/write on kkn_kv" on kkn_kv;
+create policy "Allow authenticated read/write on kkn_kv"
   on kkn_kv
   for all
-  using (true)
-  with check (true);
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
 
 -- Optional but recommended: enables live updates across partners' browsers
 -- via Supabase Realtime (Database → Replication → supabase_realtime).

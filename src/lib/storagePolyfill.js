@@ -5,17 +5,31 @@ import { supabase } from "./supabaseClient";
  * (window.storage.get(key, shared) / window.storage.set(key, value, shared))
  * that the app's useStorage() hook was written against.
  *
- * Backed by a single Supabase table, `kkn_kv`, with one row per storage key:
- *   key         text primary key
- *   value       jsonb
- *   updated_at  timestamptz
+ * shared=true (or omitted)  -> Supabase `kkn_kv` table, one row per key.
+ *   Every partner shares the same Supabase project/table, so these saves are
+ *   visible to every partner on their next load (or next save round-trip).
+ *   See supabase/schema.sql for the table + policy definitions.
  *
- * All partners share the same Supabase project/table, so every save is
- * visible to every partner on their next load (or next save round-trip).
- * See supabase/schema.sql for the table + policy definitions.
+ * shared=false -> browser localStorage, namespaced under `kkn-local:`.
+ *   Used for per-device/private data (seen-state maps, the personal
+ *   Watchlist) that should never sync across partners or devices — matches
+ *   the artifact's original per-browser-storage behavior for these keys.
  */
 
-async function get(key /*, shared */) {
+const LOCAL_PREFIX = "kkn-local:";
+
+async function get(key, shared = true) {
+  if (!shared) {
+    try {
+      const raw = window.localStorage.getItem(LOCAL_PREFIX + key);
+      return raw === null ? null : { value: raw };
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[storage] local get(${key}) failed:`, e.message);
+      return null;
+    }
+  }
+
   const { data, error } = await supabase
     .from("kkn_kv")
     .select("value")
@@ -34,7 +48,18 @@ async function get(key /*, shared */) {
   return { value: JSON.stringify(data.value) };
 }
 
-async function set(key, value /*, shared */) {
+async function set(key, value, shared = true) {
+  if (!shared) {
+    try {
+      window.localStorage.setItem(LOCAL_PREFIX + key, value);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error(`[storage] local set(${key}) failed:`, e.message);
+      throw e;
+    }
+    return;
+  }
+
   const parsed = JSON.parse(value);
   const { error } = await supabase
     .from("kkn_kv")
