@@ -4066,7 +4066,7 @@ export function Style() {
 
       .overlay{ position:fixed; inset:0; background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
       .sheet{ background:#fff; width:100%; max-width:560px; margin:0 auto; border-radius:14px 14px 0 0; max-height:92vh; display:flex; flex-direction:column; overflow-x:hidden; }
-      .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); }
+      .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; background:#fff; flex:none; }
       .sheet-head h3{ min-width:0; flex:1 1 auto; overflow-wrap:break-word; }
       .icon-btn{ flex:0 0 auto; }
       .sheet-head h3{ font-family:'Playfair Display',serif; margin:0; font-size:18px; }
