@@ -2262,6 +2262,53 @@ export default function App() {
     document.title = "Bidi Revenue Engine";
   }, []);
 
+  // Keeps a --app-vh CSS variable in sync with the *actual* visible viewport height (not the raw
+  // "100vh" the layout viewport reports). On iPhone Safari, opening the keyboard shrinks what's
+  // really visible without shrinking vh units — modals sized off raw vh can end up with their
+  // header/close button pushed off-screen behind the keyboard. visualViewport reports the real,
+  // currently-visible height, so modal sheets sized from this var stay fully reachable.
+  useEffect(() => {
+    const setAppHeight = () => {
+      const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      document.documentElement.style.setProperty("--app-vh", `${h}px`);
+    };
+    setAppHeight();
+    window.visualViewport?.addEventListener("resize", setAppHeight);
+    window.visualViewport?.addEventListener("scroll", setAppHeight);
+    window.addEventListener("resize", setAppHeight);
+    window.addEventListener("orientationchange", setAppHeight);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", setAppHeight);
+      window.visualViewport?.removeEventListener("scroll", setAppHeight);
+      window.removeEventListener("resize", setAppHeight);
+      window.removeEventListener("orientationchange", setAppHeight);
+    };
+  }, []);
+
+  // Locks background scroll while any modal/overlay is open. Without this, iOS Safari can scroll
+  // the page behind a fixed-position modal when a form field inside it is focused, dragging the
+  // modal (and its close button) out of alignment with what's actually on screen.
+  const anyModalOpen =
+    openProspect !== undefined ||
+    openReferral !== undefined ||
+    openTender !== undefined ||
+    openClient !== undefined ||
+    openReferralImpact !== undefined ||
+    notifOpen ||
+    settingsOpen;
+  useEffect(() => {
+    if (anyModalOpen) {
+      const scrollY = window.scrollY;
+      document.body.style.top = `-${scrollY}px`;
+      document.body.classList.add("modal-open");
+      return () => {
+        document.body.classList.remove("modal-open");
+        document.body.style.top = "";
+        window.scrollTo(0, scrollY);
+      };
+    }
+  }, [anyModalOpen]);
+
   if (!store.ready) {
     return (
       <div className="boot">
@@ -3953,6 +4000,7 @@ export function Style() {
       }
       *{box-sizing:border-box;}
       body,html,#root{height:100%; overflow-x:hidden;}
+      body.modal-open{ overflow:hidden; position:fixed; inset:0; width:100%; }
       .app,.boot{
         font-family:'DM Sans',sans-serif; background:var(--cream); color:var(--ink);
         min-height:100vh; max-width:560px; margin:0 auto; position:relative; overflow-x:hidden;
@@ -4006,13 +4054,13 @@ export function Style() {
       .month-nav .icon-btn{ font-size:20px; color:var(--navy); padding:2px 8px; }
       .month-nav .icon-btn:disabled{ opacity:0.3; }
       .search-box-wrap{ position:relative; margin-bottom:10px; }
-      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13.5px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
+      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:16px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
       .search-box::-webkit-search-cancel-button{ display:none; }
       .search-box:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .search-box::placeholder{ color:var(--muted); }
       .search-clear{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:13px; padding:4px; }
       .filter-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
-      .filter-row select{ padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; font-family:inherit; font-size:13px; }
+      .filter-row select{ padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; font-family:inherit; font-size:16px; }
       .overdue-banner{ background:#F7E3E3; color:var(--red); font-size:12px; font-weight:600; padding:5px 10px; border-radius:999px; }
 
       .seg{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
@@ -4058,14 +4106,14 @@ export function Style() {
       .reminder-done{ align-self:flex-start; margin-top:2px; }
       .reminder-actions{ display:flex; gap:8px; margin-top:2px; }
       .reschedule-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
-      .reschedule-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; }
+      .reschedule-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:16px; background:#fff; }
 
-      .fab{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); max-width:520px; width:calc(100% - 28px); background:var(--navy); color:#fff; border:none; padding:14px; border-radius:10px; font-weight:700; font-size:14px; box-shadow:0 8px 20px rgba(11,42,74,0.35); }
+      .fab{ position:fixed; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); left:50%; transform:translateX(-50%); max-width:520px; width:calc(100% - 28px); background:var(--navy); color:#fff; border:none; padding:14px; border-radius:10px; font-weight:700; font-size:14px; box-shadow:0 8px 20px rgba(11,42,74,0.35); }
 
       .section-intro{ font-size:13px; color:var(--muted); margin:0 0 12px; }
 
-      .overlay{ position:fixed; inset:0; background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
-      .sheet{ background:#fff; width:100%; max-width:560px; margin:0 auto; border-radius:14px 14px 0 0; max-height:92vh; display:flex; flex-direction:column; overflow-x:hidden; }
+      .overlay{ position:fixed; inset:0; height:var(--app-vh, 100vh); background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
+      .sheet{ background:#fff; width:100%; max-width:560px; margin:0 auto; border-radius:14px 14px 0 0; max-height:calc(var(--app-vh, 100vh) * 0.92); display:flex; flex-direction:column; overflow-x:hidden; }
       .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; background:#fff; flex:none; }
       .sheet-head h3{ min-width:0; flex:1 1 auto; overflow-wrap:break-word; }
       .icon-btn{ flex:0 0 auto; }
@@ -4073,7 +4121,7 @@ export function Style() {
       .icon-btn{ background:none; border:none; font-size:16px; color:var(--muted); }
       .sheet-body{ padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
       .field{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--muted); font-weight:600; }
-      .field input, .field select, .field textarea{ font-family:inherit; font-size:14px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; }
+      .field input, .field select, .field textarea{ font-family:inherit; font-size:16px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; }
       .field input:focus, .field select:focus, .field textarea:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .input-mic-row{ display:flex; gap:8px; align-items:center; }
       .input-mic-row input, .input-mic-row textarea{ flex:1; min-width:0; }
@@ -4098,7 +4146,7 @@ export function Style() {
       .watchlist-note{ font-size:12.5px; color:var(--muted); margin:0; }
       .watchlist-item-actions{ display:flex; gap:8px; flex-wrap:wrap; }
       .watchlist-add{ display:flex; flex-direction:column; gap:8px; }
-      .watchlist-add input{ padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; outline:none; }
+      .watchlist-add input{ padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:16px; background:#fff; outline:none; }
       .watchlist-add input:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .watchlist-checkback-field{ display:flex; flex-direction:column; gap:4px; font-size:11.5px; color:var(--muted); font-weight:600; }
       .watchlist-checkback{ font-size:11px; color:var(--navy-2); background:#EAF0F6; padding:3px 8px; border-radius:999px; align-self:flex-start; }
@@ -4110,7 +4158,7 @@ export function Style() {
       .cost-row-label{ font-size:12.5px; color:var(--ink); flex:1; }
       .cost-row-input{ display:flex; align-items:center; gap:5px; background:var(--cream); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
       .cost-row-input span{ font-size:10.5px; color:var(--muted); font-weight:600; }
-      .cost-row-input input{ width:64px; border:none; background:none; font-size:13px; text-align:right; font-family:inherit; }
+      .cost-row-input input{ width:72px; border:none; background:none; font-size:16px; text-align:right; font-family:inherit; }
       .cost-row-input input:focus{ outline:none; }
       .settings-menu{ display:flex; flex-direction:column; gap:2px; }
       .settings-menu-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:8px; text-align:left; }
@@ -4140,7 +4188,7 @@ export function Style() {
       .voice-panel .input-mic-row{ gap:10px; }
       .voice-panel .input-mic-row input{
         background:#fff; height:46px; padding:0 14px; border-radius:23px; border:1px solid transparent;
-        font-size:14.5px; text-overflow:ellipsis; outline:none;
+        font-size:16px; text-overflow:ellipsis; outline:none;
       }
       .voice-panel .input-mic-row input::placeholder{ color:var(--muted); opacity:0.75; }
       .voice-panel .input-mic-row input:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.28); }
@@ -4150,7 +4198,7 @@ export function Style() {
       .voice-panel-actions .chip-btn{ background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.3); }
       .voice-panel-actions .btn-primary{ background:var(--gold); color:var(--navy); flex:1; padding:10px; border-radius:8px; font-weight:700; }
       .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-      .sheet-actions{ display:flex; gap:10px; padding:14px 16px; border-top:1px solid var(--line); }
+      .sheet-actions{ display:flex; gap:10px; padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); border-top:1px solid var(--line); flex:none; }
       .btn{ flex:1; padding:12px; border-radius:8px; font-weight:700; font-size:14px; border:none; }
       .btn-primary{ background:var(--navy); color:#fff; }
       .btn-ghost{ background:#fff; border:1px solid var(--line); color:var(--ink); flex:0 0 auto; padding:12px 16px; }
@@ -4243,6 +4291,17 @@ export function Style() {
       .activity-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
       .chip-btn{ background:var(--navy); color:#fff; border:none; padding:6px 12px; border-radius:999px; font-size:12px; font-weight:600; }
       .chip-ghost{ background:#fff; color:var(--muted); border:1px solid var(--line); }
+
+      /* iPhone notch / status bar clearance for the sticky top bar */
+      .topbar{ padding-top:calc(14px + env(safe-area-inset-top, 0px)); }
+
+      /* Narrow phones (e.g. iPhone SE, older/smaller Android) — stack two-column layouts so
+         nothing gets cramped or clipped. */
+      @media (max-width: 380px) {
+        .row2{ grid-template-columns:1fr; }
+        .stat-grid{ grid-template-columns:1fr; }
+        .vault-grid{ grid-template-columns:1fr; }
+      }
     `}</style>
   );
 }
