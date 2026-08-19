@@ -35,7 +35,7 @@ const STAGES = [
   { key: "lost", label: "Lost", n: 8 },
 ];
 
-const PRACTICES = [
+const DEFAULT_PRACTICES = [
   "Corporate & Commercial",
   "Real Estate & Conveyancing",
   "Tax",
@@ -61,17 +61,17 @@ const CLIENT_TYPES = ["Institutional", "Individual"];
 const PROBABILITIES = [10, 25, 50, 75, 90];
 
 const ACTIVITY_TYPES = [
-  { key: "org_researched", label: "Target org researched", target: 100, source: "prospects" },
-  { key: "outreach", label: "Quality direct outreach", target: 90, source: "prospects" },
-  { key: "existing_client", label: "Existing client contacted", target: 20, source: "clients" },
-  { key: "referral_contact", label: "Referral partner contacted", target: 15, source: "referrals" },
-  { key: "meeting", label: "Client / prospect meeting", target: 13, source: "prospects_clients" },
-  { key: "event", label: "Event attended", target: 4, source: null },
-  { key: "linkedin_post", label: "LinkedIn post published", target: 12, source: null },
-  { key: "client_alert", label: "Client alert / article", target: 2, source: "clients" },
-  { key: "foreign_firm", label: "Foreign firm approached", target: 17, source: null },
-  { key: "tender_reviewed", label: "Tender / RFP reviewed", target: 15, source: "tenders" },
-  { key: "bid_submitted", label: "Serious bid submitted", target: 4, source: "tenders" },
+  { key: "org_researched", label: "Target org researched", target: 100, source: "prospects", defaultCost: 0 },
+  { key: "outreach", label: "Quality direct outreach", target: 90, source: "prospects", defaultCost: 200 },
+  { key: "existing_client", label: "Existing client contacted", target: 20, source: "clients", defaultCost: 500 },
+  { key: "referral_contact", label: "Referral partner contacted", target: 15, source: "referrals", defaultCost: 500 },
+  { key: "meeting", label: "Client / prospect meeting", target: 13, source: "prospects_clients", defaultCost: 2000 },
+  { key: "event", label: "Event attended", target: 4, source: null, defaultCost: 5000 },
+  { key: "linkedin_post", label: "LinkedIn post published", target: 12, source: null, defaultCost: 0 },
+  { key: "client_alert", label: "Client alert / article", target: 2, source: "clients", defaultCost: 0 },
+  { key: "foreign_firm", label: "Foreign firm approached", target: 17, source: null, defaultCost: 300 },
+  { key: "tender_reviewed", label: "Tender / RFP reviewed", target: 15, source: "tenders", defaultCost: 0 },
+  { key: "bid_submitted", label: "Serious bid submitted", target: 4, source: "tenders", defaultCost: 3000 },
 ];
 
 const TENDER_STAGES = [
@@ -370,6 +370,14 @@ function useStorage() {
   // Personal (per-device), keyed by partner id — names a partner is quietly cultivating before
   // they're ready to become a real, firm-visible Prospect. Never synced to the shared board.
   const [watchlist, setWatchlist] = useState({});
+  // Firm-wide default cost per activity type (KES) — a settings table any partner can tune, applied
+  // as the starting estimate when logging an activity, always overridable at the point of entry.
+  const [activityCosts, setActivityCosts] = useState(
+    Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]))
+  );
+  // Firm-wide practice area list — editable in Settings, so a firm can add "Aviation" or "M&A"
+  // without needing a code change.
+  const [practices, setPractices] = useState(DEFAULT_PRACTICES);
 
   useEffect(() => {
     (async () => {
@@ -382,7 +390,8 @@ function useStorage() {
             return fallback;
           }
         };
-        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl] = await Promise.all([
+        const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
+        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc] = await Promise.all([
           safe("kkn-partners", DEFAULT_PARTNERS),
           safe("kkn-prospects", []),
           safe("kkn-referrals", []),
@@ -396,6 +405,8 @@ function useStorage() {
           safe("seen-tenders", {}, false),
           safe("seen-activity-types", {}, false),
           safe("watchlist", {}, false),
+          safe("kkn-activity-costs", defaultCosts),
+          safe("kkn-practices", DEFAULT_PRACTICES),
         ]);
         setPartners(pt);
         setProspects(pr);
@@ -410,6 +421,10 @@ function useStorage() {
         setSeenTenders(st);
         setSeenActivityTypes(sat);
         setWatchlist(wl);
+        // Merge over defaults so a newly added activity type always has a sane starting cost,
+        // even if the saved table predates it.
+        setActivityCosts({ ...defaultCosts, ...ct });
+        setPractices(pc && pc.length > 0 ? pc : DEFAULT_PRACTICES);
       } catch (e) {
         setError("Could not load shared data. You can keep working; changes may not save.");
       } finally {
@@ -564,10 +579,20 @@ function useStorage() {
         setReferrals(next);
         persist("kkn-referrals", next);
       },
-      logActivity: (partnerId, type, subject) => {
-        const next = [...activity, { id: uid(), partnerId, type, date: todayISO(), subject: subject || "" }];
+      logActivity: (partnerId, type, subject, cost) => {
+        const next = [...activity, { id: uid(), partnerId, type, date: todayISO(), subject: subject || "", cost: Number(cost) || 0 }];
         setActivity(next);
         persist("kkn-activity", next);
+      },
+      activityCosts,
+      saveActivityCosts: (next) => {
+        setActivityCosts(next);
+        persist("kkn-activity-costs", next);
+      },
+      practices,
+      savePractices: (next) => {
+        setPractices(next);
+        persist("kkn-practices", next);
       },
       undoActivity: (type, partnerId) => {
         const idx = [...activity]
@@ -640,7 +665,7 @@ function useStorage() {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, persist]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, practices, persist]
   );
 
   return { ready, error, ...api };
@@ -1265,7 +1290,7 @@ const REFERRAL_VOICE_FIELDS = [
   { key: "notes", label: "Notes", placeholder: "Context" },
 ];
 
-function ProspectModal({ prospect, partners, referrals, clients, tenders, activity, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ProspectModal({ prospect, partners, referrals, clients, tenders, activity, practices, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     prospect
       ? {
@@ -1284,7 +1309,7 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
           contactPhone: "",
           contactEmail: "",
           sector: "",
-          practiceArea: PRACTICES[0],
+          practiceArea: practices[0],
           clientType: CLIENT_TYPES[0],
           opportunity: "",
           estimatedFee: "",
@@ -1375,7 +1400,7 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
             </Field>
             <Field label="Practice area">
               <select value={f.practiceArea} onChange={set("practiceArea")}>
-                {PRACTICES.map((x) => <option key={x}>{x}</option>)}
+                {practices.map((x) => <option key={x}>{x}</option>)}
               </select>
             </Field>
           </div>
@@ -2039,6 +2064,139 @@ function ReferralImpactPanel({ kind, record, store, onOpenProspect, onClose }) {
   );
 }
 
+// Cost of BD — the firm's shared, editable estimate table. A page within Settings, not the
+// whole of it; more bespoke items (practice areas, and whatever else needs tailoring per firm)
+// live alongside it as their own pages off the same menu.
+function CostOfBDPage({ store }) {
+  const [costs, setCosts] = useState({ ...store.activityCosts });
+  const dirty = ACTIVITY_TYPES.some((t) => Number(costs[t.key] || 0) !== Number(store.activityCosts[t.key] || 0));
+
+  return (
+    <>
+      <p className="insight-note">
+        Standard, out-of-pocket estimates per activity — fuel, airtime, event tickets, that kind of thing. Not billable time. These pre-fill the cost field when anyone logs an activity on the Scorecard, and can always be overridden for a specific entry.
+      </p>
+      <div className="cost-table">
+        {ACTIVITY_TYPES.map((t) => (
+          <div key={t.key} className="cost-row">
+            <span className="cost-row-label">{t.label}</span>
+            <div className="cost-row-input">
+              <span>KES</span>
+              <input
+                type="number"
+                min="0"
+                value={costs[t.key] ?? 0}
+                onChange={(e) => setCosts({ ...costs, [t.key]: e.target.value })}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!dirty}
+        onClick={() => {
+          const cleaned = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, Number(costs[t.key]) || 0]));
+          store.saveActivityCosts(cleaned);
+        }}
+        style={{ marginTop: 14 }}
+      >
+        Save cost table
+      </button>
+    </>
+  );
+}
+
+// Practice Areas — the list every prospect's "Practice area" dropdown pulls from, editable here
+// instead of needing a code change every time the firm picks up a new practice.
+function PracticeAreasPage({ store }) {
+  const [items, setItems] = useState([...store.practices]);
+  const [newItem, setNewItem] = useState("");
+  const dirty = JSON.stringify(items) !== JSON.stringify(store.practices);
+
+  const add = () => {
+    const v = newItem.trim();
+    if (!v || items.includes(v)) return;
+    setItems([...items, v]);
+    setNewItem("");
+  };
+  const remove = (i) => setItems(items.filter((_, idx) => idx !== i));
+
+  return (
+    <>
+      <p className="insight-note">
+        The practice areas every prospect and client get categorized under. Add one when the firm picks up a new area — Aviation, M&amp;A, whatever's next — remove one that's no longer used. Existing records keep whatever they were already tagged with even if it's removed from this list.
+      </p>
+      <div className="cost-table">
+        {items.map((p, i) => (
+          <div key={p} className="cost-row">
+            <span className="cost-row-label">{p}</span>
+            <button type="button" className="icon-btn" onClick={() => remove(i)} aria-label={`Remove ${p}`}>✕</button>
+          </div>
+        ))}
+        {items.length === 0 && <p className="empty">No practice areas left — add at least one below.</p>}
+      </div>
+      <div className="watchlist-add" style={{ marginTop: 12 }}>
+        <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="e.g. Aviation" />
+        <button type="button" className="chip-btn" onClick={add}>+ Add practice area</button>
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!dirty || items.length === 0}
+        onClick={() => store.savePractices(items)}
+        style={{ marginTop: 14 }}
+      >
+        Save practice areas
+      </button>
+    </>
+  );
+}
+
+// Settings — a menu of bespoke, firm-wide items. Starts with two; the pattern is meant to grow,
+// so each item is its own page rather than everything living flat on one screen.
+const SETTINGS_PAGES = [
+  { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage },
+  { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage },
+];
+
+function SettingsModal({ store, onClose }) {
+  const [page, setPage] = useState(null); // null = menu, or a SETTINGS_PAGES key
+  const active = SETTINGS_PAGES.find((p) => p.key === page);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          {active ? (
+            <button className="icon-btn" onClick={() => setPage(null)} aria-label="Back to Settings">‹</button>
+          ) : (
+            <span style={{ width: 28 }} />
+          )}
+          <h3>{active ? active.label : "Settings"}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="sheet-body">
+          {active ? (
+            <active.Component store={store} />
+          ) : (
+            <div className="settings-menu">
+              {SETTINGS_PAGES.map((p) => (
+                <button key={p.key} type="button" className="settings-menu-row" onClick={() => setPage(p.key)}>
+                  <span className="settings-menu-text">
+                    <span className="settings-menu-label">{p.label}</span>
+                    <span className="settings-menu-desc">{p.desc}</span>
+                  </span>
+                  <span className="settings-menu-caret">›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectReferral, onSelectTender, onSelectActivityType, onClose }) {
   const groups = [
     { label: "Prospects", items: feed.prospects, getTitle: (r) => r.organization, onSelect: onSelectProspect },
@@ -2097,6 +2255,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState({});
   const [tenderCollapsed, setTenderCollapsed] = useState({});
   const [notifOpen, setNotifOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
 
   useEffect(() => {
@@ -2181,6 +2340,7 @@ export default function App() {
               🔔<span className="notif-count">{feed.total}</span>
             </button>
           )}
+          <button className="notif-bell" onClick={() => setSettingsOpen(true)} aria-label="Settings">⚙️</button>
           <button className="me-chip" onClick={() => setMe(null)}>
             {myPartner?.name || "Switch"}
           </button>
@@ -2198,6 +2358,8 @@ export default function App() {
           onClose={() => setNotifOpen(false)}
         />
       )}
+
+      {settingsOpen && <SettingsModal store={store} onClose={() => setSettingsOpen(false)} />}
 
       <nav className="tabs">
         {[
@@ -2458,6 +2620,7 @@ export default function App() {
           clients={store.clients}
           tenders={store.tenders}
           activity={store.activity}
+          practices={store.practices}
           me={me}
           prefillOrg={prospectPrefill}
           onSave={store.saveProspect}
@@ -2864,6 +3027,7 @@ function LogActivityModal({ activityType, store, me, onClose }) {
   const [query, setQuery] = useState("");
   const [firmName, setFirmName] = useState("");
   const [firmIndustry, setFirmIndustry] = useState("");
+  const [cost, setCost] = useState(String(store.activityCosts[activityType.key] ?? 0));
   const isForeignFirm = activityType.key === "foreign_firm";
   const source = activityType.source;
 
@@ -2894,7 +3058,7 @@ function LogActivityModal({ activityType, store, me, onClose }) {
 
   const submit = (label) => {
     const subject = isForeignFirm ? foreignFirmSubject() : (label ?? query).trim();
-    store.logActivity(me, activityType.key, subject);
+    store.logActivity(me, activityType.key, subject, cost);
     const newAllTimeCount = store.activity.filter((a) => a.type === activityType.key).length + 1;
     store.markActivityTypeSeen(activityType.key, newAllTimeCount);
     onClose();
@@ -2944,6 +3108,12 @@ function LogActivityModal({ activityType, store, me, onClose }) {
               )}
             </>
           )}
+          <Field label="Estimated cost (KES, optional)">
+            <input type="number" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0" />
+          </Field>
+          <p className="insight-note">
+            Pre-filled from the firm's standard estimate for {activityType.label.toLowerCase()} — adjust it if this one cost more or less. Change the default in ⚙️ Settings → Cost of BD.
+          </p>
         </div>
         <div className="sheet-actions">
           <button className="btn btn-primary" onClick={() => submit()}>
@@ -2990,6 +3160,18 @@ function Insights({ store }) {
   const reachedProposal = prospects.filter((p) => reachedInScope(p, "proposal_submitted")).length;
   const wonCount = prospects.filter(isWonInScope).length;
   const winRate = reachedProposal > 0 ? Math.round((wonCount / reachedProposal) * 100) : null;
+
+  // --- Cost of BD — what's actually being spent, and what it's buying. Out-of-pocket only, scoped
+  // to the same all-time/month view as the rest of the page. Framed as a firm/self-reflection number,
+  // deliberately never surfaced as a ranked comparison across partners.
+  const costScopedActivity = isAllTime ? scopedActivity : scopedActivity.filter((a) => monthKey(a.date) === viewMonth);
+  const totalCost = costScopedActivity.reduce((a, x) => a + (Number(x.cost) || 0), 0);
+  const costByType = ACTIVITY_TYPES.map((t) => ({
+    label: t.label,
+    cost: costScopedActivity.filter((a) => a.type === t.key).reduce((a, x) => a + (Number(x.cost) || 0), 0),
+  })).filter((r) => r.cost > 0).sort((a, b) => b.cost - a.cost);
+  const costPerWin = wonCount > 0 ? Math.round(totalCost / wonCount) : null;
+  const costAsShareOfWon = wonInScopeValue > 0 ? Math.round((totalCost / wonInScopeValue) * 1000) / 10 : null;
 
   // --- Won value by month, last 6 months ---
   const monthKeys = [];
@@ -3050,7 +3232,7 @@ function Insights({ store }) {
 
 
   // --- Won vs live pipeline by practice area ---
-  const byPractice = PRACTICES.map((pa) => {
+  const byPractice = store.practices.map((pa) => {
     const won = prospects.filter((p) => p.practiceArea === pa && isWonInScope(p)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
     const pipeline = prospects.filter((p) => p.practiceArea === pa && !["won", "lost"].includes(p.status)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
     return { name: pa.replace(" & ", " &\n"), Won: won, Pipeline: pipeline };
@@ -3342,6 +3524,38 @@ function Insights({ store }) {
           </section>
 
           <section className="insight-card">
+            <h4>Cost of BD{isDrilldown ? ` — ${drilldownPartner?.name}'s own activity` : ""}</h4>
+            <p className="insight-note">
+              Out-of-pocket only — fuel, airtime, tickets, that kind of thing, {isAllTime ? "all time" : `for ${monthLabel(viewMonth)}`}. {isDrilldown ? "Your own numbers, for your own reflection — not a comparison." : "A firm-level view, not a per-partner ranking."} Edit the standard estimates in ⚙️ Settings.
+            </p>
+            <section className="stat-grid">
+              <div className="stat">
+                <span className="stat-value">{fmtKES(totalCost)}</span>
+                <span className="stat-label">Total spent on BD</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{costPerWin != null ? fmtKES(costPerWin) : "—"}</span>
+                <span className="stat-label">Cost per win</span>
+              </div>
+              <div className="stat">
+                <span className="stat-value">{costAsShareOfWon != null ? `${costAsShareOfWon}%` : "—"}</span>
+                <span className="stat-label">Cost as share of won value</span>
+              </div>
+            </section>
+            {costByType.length > 0 && (
+              <ResponsiveContainer width="100%" height={Math.max(100, costByType.length * 34)}>
+                <BarChart data={costByType} layout="vertical" margin={{ top: 4, right: 12, left: 4, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E4DFD3" />
+                  <XAxis type="number" tick={{ fontSize: 10, fill: "#6B7684" }} axisLine={false} tickLine={false} tickFormatter={(v) => (v >= 1000 ? `${Math.round(v / 1000)}K` : v)} />
+                  <YAxis type="category" dataKey="label" tick={{ fontSize: 10.5, fill: "#1B2430" }} axisLine={false} tickLine={false} width={110} />
+                  <Tooltip formatter={chartTooltip} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                  <Bar dataKey="cost" fill={CHART_NAVY} radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </section>
+
+          <section className="insight-card">
             <h4>Won value by month</h4>
             <p className="insight-note">Last 6 months, from when each prospect actually reached Won.</p>
             <ResponsiveContainer width="100%" height={180}>
@@ -3352,6 +3566,7 @@ function Insights({ store }) {
                 <Tooltip formatter={chartTooltip} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                 <Bar dataKey="value" fill={CHART_GOLD} radius={[4, 4, 0, 0]} />
               </BarChart>
+
             </ResponsiveContainer>
           </section>
 
@@ -3890,6 +4105,19 @@ export function Style() {
       .watchlist-checkback-due{ color:var(--amber); background:#FBF1DC; }
       .contact-link-row{ display:flex; gap:8px; margin-top:-4px; }
       .contact-link{ flex:1; text-align:center; font-size:12.5px; font-weight:700; color:var(--navy); background:#E7EEF5; border-radius:8px; padding:9px; text-decoration:none; }
+      .cost-table{ display:flex; flex-direction:column; gap:2px; }
+      .cost-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+      .cost-row-label{ font-size:12.5px; color:var(--ink); flex:1; }
+      .cost-row-input{ display:flex; align-items:center; gap:5px; background:var(--cream); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+      .cost-row-input span{ font-size:10.5px; color:var(--muted); font-weight:600; }
+      .cost-row-input input{ width:64px; border:none; background:none; font-size:13px; text-align:right; font-family:inherit; }
+      .cost-row-input input:focus{ outline:none; }
+      .settings-menu{ display:flex; flex-direction:column; gap:2px; }
+      .settings-menu-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:8px; text-align:left; }
+      .settings-menu-text{ display:flex; flex-direction:column; gap:2px; }
+      .settings-menu-label{ font-size:14px; font-weight:700; color:var(--navy); }
+      .settings-menu-desc{ font-size:11.5px; color:var(--muted); }
+      .settings-menu-caret{ font-size:18px; color:var(--muted); }
       .cal-panel{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:14px; }
       .cal-weekday-row{ display:grid; grid-template-columns:repeat(7,1fr); text-align:center; font-size:10.5px; color:var(--muted); font-weight:700; margin-bottom:4px; }
       .cal-week{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:4px; }
