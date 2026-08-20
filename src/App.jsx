@@ -44,6 +44,35 @@ const DEFAULT_PRACTICES = [
   "Other",
 ];
 
+const DEFAULT_SECTORS = [
+  "Financial Services & Banking",
+  "Insurance",
+  "Real Estate & Construction",
+  "Manufacturing",
+  "Technology & Fintech",
+  "Energy & Mining",
+  "Agriculture & Agribusiness",
+  "Logistics & Transport",
+  "Healthcare & Pharmaceuticals",
+  "Hospitality & Tourism",
+  "Telecommunications",
+  "Retail & FMCG",
+  "Other",
+];
+
+const DEFAULT_REFERRAL_TYPES = [
+  "Accountant",
+  "Auditor",
+  "Real-estate agent",
+  "Insurance broker",
+  "Company secretary",
+  "Banker",
+  "Financial advisor",
+  "Notary",
+  "Business consultant",
+  "Other",
+];
+
 const STRENGTHS = ["Cold", "Warm", "Strong"];
 
 const SOURCES = [
@@ -179,10 +208,10 @@ function buildSampleData() {
   const stageHist = (entries) => entries.map(([stage, daysAgo, partnerId]) => ({ kind: "stage", stage, date: iso(daysAgo), partnerId }));
 
   const referrals = [
-    { id: "r1", name: "Amina Hassan — Senior Auditor, KMP & Associates", type: "Auditor", practiceFed: "Tax / Investigations", responsiblePartner: P_C, lastContact: iso(14), nextAction: "Send Q3 tax alert", nextActionDate: isoFuture(5), notes: "" },
-    { id: "r2", name: "David Mwangi — Real Estate Agent, Knight Frank", type: "Real-estate agent", practiceFed: "Conveyancing", responsiblePartner: P_B, lastContact: iso(41), nextAction: "Coffee to discuss new listings", nextActionDate: iso(21), notes: "" },
-    { id: "r3", name: "Grace Wambui — Company Secretary, Corporate Sec Ltd", type: "Company secretary", practiceFed: "Corporate", responsiblePartner: P_A, lastContact: iso(5), nextAction: "Introduce to Partner A re: governance mandate", nextActionDate: isoFuture(3), notes: "" },
-    { id: "r4", name: "Peter Otieno — Insurance Broker, AON Kenya", type: "Insurance broker", practiceFed: "Litigation / Corporate", responsiblePartner: P_D, lastContact: iso(56), nextAction: "", nextActionDate: "", notes: "" },
+    { id: "r1", name: "Amina Hassan — Senior Auditor, KMP & Associates", type: "Auditor", practiceFed: ["Tax"], responsiblePartner: P_C, lastContact: iso(14), nextAction: "Send Q3 tax alert", nextActionDate: isoFuture(5), notes: "" },
+    { id: "r2", name: "David Mwangi — Real Estate Agent, Knight Frank", type: "Real-estate agent", practiceFed: ["Real Estate & Conveyancing"], responsiblePartner: P_B, lastContact: iso(41), nextAction: "Coffee to discuss new listings", nextActionDate: iso(21), notes: "" },
+    { id: "r3", name: "Grace Wambui — Company Secretary, Corporate Sec Ltd", type: "Company secretary", practiceFed: ["Corporate & Commercial"], responsiblePartner: P_A, lastContact: iso(5), nextAction: "Introduce to Partner A re: governance mandate", nextActionDate: isoFuture(3), notes: "" },
+    { id: "r4", name: "Peter Otieno — Insurance Broker, AON Kenya", type: "Insurance broker", practiceFed: ["Commercial Litigation", "Corporate & Commercial"], responsiblePartner: P_D, lastContact: iso(56), nextAction: "", nextActionDate: "", notes: "" },
   ];
 
   const clients = [
@@ -378,6 +407,8 @@ function useStorage() {
   // Firm-wide practice area list — editable in Settings, so a firm can add "Aviation" or "M&A"
   // without needing a code change.
   const [practices, setPractices] = useState(DEFAULT_PRACTICES);
+  const [sectors, setSectors] = useState(DEFAULT_SECTORS);
+  const [referralTypes, setReferralTypes] = useState(DEFAULT_REFERRAL_TYPES);
 
   useEffect(() => {
     (async () => {
@@ -391,7 +422,7 @@ function useStorage() {
           }
         };
         const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
-        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc] = await Promise.all([
+        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt] = await Promise.all([
           safe("kkn-partners", DEFAULT_PARTNERS),
           safe("kkn-prospects", []),
           safe("kkn-referrals", []),
@@ -407,6 +438,8 @@ function useStorage() {
           safe("watchlist", {}, false),
           safe("kkn-activity-costs", defaultCosts),
           safe("kkn-practices", DEFAULT_PRACTICES),
+          safe("kkn-sectors", DEFAULT_SECTORS),
+          safe("kkn-referral-types", DEFAULT_REFERRAL_TYPES),
         ]);
         setPartners(pt);
         setProspects(pr);
@@ -425,6 +458,8 @@ function useStorage() {
         // even if the saved table predates it.
         setActivityCosts({ ...defaultCosts, ...ct });
         setPractices(pc && pc.length > 0 ? pc : DEFAULT_PRACTICES);
+        setSectors(sx && sx.length > 0 ? sx : DEFAULT_SECTORS);
+        setReferralTypes(rt && rt.length > 0 ? rt : DEFAULT_REFERRAL_TYPES);
       } catch (e) {
         setError("Could not load shared data. You can keep working; changes may not save.");
       } finally {
@@ -594,6 +629,16 @@ function useStorage() {
         setPractices(next);
         persist("kkn-practices", next);
       },
+      sectors,
+      saveSectors: (next) => {
+        setSectors(next);
+        persist("kkn-sectors", next);
+      },
+      referralTypes,
+      saveReferralTypes: (next) => {
+        setReferralTypes(next);
+        persist("kkn-referral-types", next);
+      },
       undoActivity: (type, partnerId) => {
         const idx = [...activity]
           .reverse()
@@ -665,7 +710,7 @@ function useStorage() {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, practices, persist]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, practices, sectors, referralTypes, persist]
   );
 
   return { ready, error, ...api };
@@ -719,6 +764,18 @@ const activityMatchesProspect = (activity, prospect) => {
   const subject = (activity.subject || "").trim().toLowerCase();
   if (org.length < 3 || subject.length < 3) return false;
   return subject === org || subject.includes(org) || org.includes(subject);
+};
+
+// If a record's saved value predates a dropdown (or was typed as free text before one existed),
+// keep it selectable rather than silently dropping it when the list doesn't contain an exact match.
+const optionsWithLegacy = (list, currentValue) =>
+  currentValue && !list.includes(currentValue) ? [currentValue, ...list] : list;
+// Same idea, for a multi-select tag field — anything already selected but no longer on the shared
+// list still shows up as a selectable (checked) tag instead of silently vanishing.
+const tagOptionsWithLegacy = (list, currentValues) => {
+  const arr = Array.isArray(currentValues) ? currentValues : (currentValues ? [currentValues] : []);
+  const extra = arr.filter((x) => !list.includes(x));
+  return [...list, ...extra];
 };
 
 // Every prospect a specific client or referral partner is credited with bringing in — same
@@ -1084,6 +1141,26 @@ function ActivityTimeline({ prospect, activity, partners }) {
   );
 }
 
+// A safety net before anything gets permanently deleted — tap once to ask, tap again to actually
+// do it. Works as a full labeled button (Delete) or a small icon-only one (✕) interchangeably.
+function ConfirmButton({ onConfirm, className, children, confirmLabel = "Yes, delete", ariaLabel }) {
+  const [confirming, setConfirming] = useState(false);
+  if (confirming) {
+    return (
+      <span className="confirm-inline">
+        <span className="confirm-inline-text">Sure?</span>
+        <button type="button" className="chip-btn chip-danger" onClick={onConfirm}>{confirmLabel}</button>
+        <button type="button" className="chip-btn chip-ghost" onClick={(e) => { e.stopPropagation(); setConfirming(false); }}>Cancel</button>
+      </span>
+    );
+  }
+  return (
+    <button type="button" className={className} onClick={(e) => { e.stopPropagation(); setConfirming(true); }} aria-label={ariaLabel}>
+      {children}
+    </button>
+  );
+}
+
 function Field({ label, children }) {
   return (
     <label className="field">
@@ -1228,6 +1305,14 @@ function VoiceFillPanel({ fields, f, setF, onExit }) {
     goTo(step + 1, updated);
   };
   const skip = () => goTo(step + 1);
+  const goBack = () => {
+    const updated = { ...f, [field.key]: draft };
+    setF(updated);
+    setVoiceError("");
+    const prevStep = Math.max(0, step - 1);
+    setStep(prevStep);
+    setDraft(updated[fields[prevStep].key] || "");
+  };
   const clearDraft = () => setDraft("");
 
   return (
@@ -1245,6 +1330,7 @@ function VoiceFillPanel({ fields, f, setF, onExit }) {
         {voiceError && <span className="voice-error voice-error-dark">{voiceError}</span>}
       </div>
       <div className="voice-panel-actions">
+        <button type="button" className="chip-btn chip-ghost" onClick={goBack} disabled={step === 0}>← Back</button>
         <button type="button" className="chip-btn chip-ghost" onClick={clearDraft}>Clear</button>
         <button type="button" className="chip-btn chip-ghost" onClick={skip}>Skip</button>
         <button type="button" className="btn btn-primary" onClick={confirm}>
@@ -1285,12 +1371,11 @@ const TENDER_VOICE_FIELDS = [
 const REFERRAL_VOICE_FIELDS = [
   { key: "name", label: "Name", placeholder: "e.g. Amina — auditor, KMP & Associates" },
   { key: "type", label: "Type", placeholder: "e.g. Accountant / Agent / Broker..." },
-  { key: "practiceFed", label: "Practice fed", placeholder: "e.g. Tax / Corporate" },
   { key: "nextAction", label: "Next action", placeholder: "e.g. Coffee to discuss pipeline" },
   { key: "notes", label: "Notes", placeholder: "Context" },
 ];
 
-function ProspectModal({ prospect, partners, referrals, clients, tenders, activity, practices, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ProspectModal({ prospect, partners, referrals, clients, tenders, activity, practices, sectors, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     prospect
       ? {
@@ -1328,6 +1413,7 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
         }
   );
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [saveError, setSaveError] = useState("");
   useEffect(() => {
     if (prospect) markSeen?.(prospect.id, prospectActivityCount(prospect));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1367,17 +1453,28 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
               </button>
             )
           )}
-          <Field label="Organization">
-            <input value={f.organization} onChange={set("organization")} placeholder="ABC Developers Ltd" />
+          <Field label="Client type">
+            <select value={f.clientType} onChange={set("clientType")}>
+              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
+            </select>
           </Field>
-          <div className="row2">
-            <Field label="Contact">
-              <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
-            </Field>
-            <Field label="Position">
-              <input value={f.position} onChange={set("position")} placeholder="CFO" />
-            </Field>
-          </div>
+          <Field label={f.clientType === "Individual" ? "Full name" : "Organization"}>
+            <input
+              value={f.organization}
+              onChange={set("organization")}
+              placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Developers Ltd"}
+            />
+          </Field>
+          {f.clientType !== "Individual" && (
+            <div className="row2">
+              <Field label="Contact">
+                <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+              </Field>
+              <Field label="Position">
+                <input value={f.position} onChange={set("position")} placeholder="CFO" />
+              </Field>
+            </div>
+          )}
           <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
             {showContact
               ? "− Hide contact details"
@@ -1395,20 +1492,24 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
           )}
           {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
           <div className="row2">
-            <Field label="Sector">
-              <input value={f.sector} onChange={set("sector")} placeholder="Real estate" />
-            </Field>
+            {f.clientType === "Individual" ? (
+              <Field label="Occupation / role (optional)">
+                <input value={f.sector} onChange={set("sector")} placeholder="e.g. Business owner, retired banker" />
+              </Field>
+            ) : (
+              <Field label="Sector">
+                <select value={f.sector} onChange={set("sector")}>
+                  <option value="">— Select —</option>
+                  {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Practice area">
               <select value={f.practiceArea} onChange={set("practiceArea")}>
                 {practices.map((x) => <option key={x}>{x}</option>)}
               </select>
             </Field>
           </div>
-          <Field label="Client type">
-            <select value={f.clientType} onChange={set("clientType")}>
-              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </Field>
           <Field label="Opportunity">
             <input value={f.opportunity} onChange={set("opportunity")} placeholder="Acquisition / development due diligence" />
           </Field>
@@ -1506,15 +1607,20 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
           />
         </div>
         <div className="sheet-actions">
+          {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {prospect && (
-            <button className="btn btn-ghost btn-danger" onClick={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
               Delete
-            </button>
+            </ConfirmButton>
           )}
           <button
             className="btn btn-primary"
             onClick={() => {
-              if (!f.organization.trim()) return;
+              if (!f.organization.trim()) {
+                setSaveError("Organization name is required before this can be saved.");
+                return;
+              }
+              setSaveError("");
               const prevHistory = f.statusHistory || [];
               const statusChanged = !prospect || prospect.status !== f.status;
               const actionCompleted = prospect && prospect.nextAction && prospect.nextAction !== f.nextAction;
@@ -1543,12 +1649,20 @@ function ProspectModal({ prospect, partners, referrals, clients, tenders, activi
   );
 }
 
-function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ReferralModal({ item, prefillName, partners, practices, referralTypes, me, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+  // practiceFed used to be a single free-text string ("Tax / Corporate") — treat that as a legacy
+  // value and split it into tags on open, rather than losing it or forcing a re-entry.
+  const normalizePracticeFed = (val) => {
+    if (Array.isArray(val)) return val;
+    if (!val) return [];
+    return val.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
+  };
   const [f, setF] = useState(
     item
       ? {
           ...item,
           responsiblePartner: item.responsiblePartner || partners[0]?.id || "",
+          practiceFed: normalizePracticeFed(item.practiceFed),
           notes: "",
           notesHistory:
             item.notesHistory ||
@@ -1558,7 +1672,7 @@ function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onCl
           id: uid(),
           name: prefillName || "",
           type: "",
-          practiceFed: "",
+          practiceFed: [],
           responsiblePartner: partners[0]?.id || "",
           phone: "",
           email: "",
@@ -1570,6 +1684,7 @@ function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onCl
         }
   );
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [saveError, setSaveError] = useState("");
   useEffect(() => {
     if (item) markSeen?.(item.id, referralActivityCount(item));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1599,16 +1714,37 @@ function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onCl
           </Field>
           <div className="row2">
             <Field label="Type">
-              <input value={f.type} onChange={set("type")} placeholder="Accountant / Agent / Broker..." />
+              <select value={f.type} onChange={set("type")}>
+                <option value="">— Select —</option>
+                {optionsWithLegacy(referralTypes, f.type).map((x) => <option key={x}>{x}</option>)}
+              </select>
             </Field>
-            <Field label="Practice fed">
-              <input value={f.practiceFed} onChange={set("practiceFed")} placeholder="Tax / Corporate" />
+            <Field label="Responsible partner">
+              <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
+                {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
             </Field>
           </div>
-          <Field label="Responsible partner">
-            <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
-              {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-            </select>
+          <Field label="Practice fed">
+            <div className="tag-picker">
+              {tagOptionsWithLegacy(practices, f.practiceFed).map((p) => {
+                const active = (f.practiceFed || []).includes(p);
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`tag-chip ${active ? "tag-chip-active" : ""}`}
+                    onClick={() => {
+                      const current = f.practiceFed || [];
+                      const next = active ? current.filter((x) => x !== p) : [...current, p];
+                      setF({ ...f, practiceFed: next });
+                    }}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
           <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
             {showContact
@@ -1652,15 +1788,20 @@ function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onCl
           />
         </div>
         <div className="sheet-actions">
+          {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {item && (
-            <button className="btn btn-ghost btn-danger" onClick={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
               Delete
-            </button>
+            </ConfirmButton>
           )}
           <button
             className="btn btn-primary"
             onClick={() => {
-              if (!f.name.trim()) return;
+              if (!f.name.trim()) {
+                setSaveError("Name is required before this can be saved.");
+                return;
+              }
+              setSaveError("");
               const actionCompleted = item && item.nextAction && item.nextAction !== f.nextAction;
               const noteText = f.notes.trim();
               let nextNotesHistory = f.notesHistory || [];
@@ -1683,7 +1824,7 @@ function ReferralModal({ item, prefillName, partners, me, onSave, onDelete, onCl
   );
 }
 
-function ClientModal({ item, partners, me, prefillName, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ClientModal({ item, partners, sectors, me, prefillName, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     item
       ? {
@@ -1712,6 +1853,7 @@ function ClientModal({ item, partners, me, prefillName, onSave, onDelete, onClos
         }
   );
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [saveError, setSaveError] = useState("");
   useEffect(() => {
     if (item) markSeen?.(item.id, clientActivityCount(item));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1737,24 +1879,37 @@ function ClientModal({ item, partners, me, prefillName, onSave, onDelete, onClos
               </button>
             )
           )}
-          <Field label="Client / organization name">
-            <input value={f.name} onChange={set("name")} placeholder="ABC Holdings Ltd" />
+          <Field label="Client type">
+            <select value={f.clientType} onChange={set("clientType")}>
+              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
+            </select>
+          </Field>
+          <Field label={f.clientType === "Individual" ? "Client name" : "Client / organization name"}>
+            <input
+              value={f.name}
+              onChange={set("name")}
+              placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Holdings Ltd"}
+            />
           </Field>
           <div className="row2">
-            <Field label="Sector">
-              <input value={f.sector} onChange={set("sector")} placeholder="Manufacturing" />
-            </Field>
+            {f.clientType === "Individual" ? (
+              <Field label="Occupation / role (optional)">
+                <input value={f.sector} onChange={set("sector")} placeholder="e.g. Business owner, retired banker" />
+              </Field>
+            ) : (
+              <Field label="Sector">
+                <select value={f.sector} onChange={set("sector")}>
+                  <option value="">— Select —</option>
+                  {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Responsible partner">
               <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
                 {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select>
             </Field>
           </div>
-          <Field label="Client type">
-            <select value={f.clientType} onChange={set("clientType")}>
-              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </Field>
           <Field label="What they instructed us on">
             <input value={f.instructedOn} onChange={set("instructedOn")} placeholder="Property acquisition" />
           </Field>
@@ -1803,15 +1958,20 @@ function ClientModal({ item, partners, me, prefillName, onSave, onDelete, onClos
           />
         </div>
         <div className="sheet-actions">
+          {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {item && (
-            <button className="btn btn-ghost btn-danger" onClick={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
               Delete
-            </button>
+            </ConfirmButton>
           )}
           <button
             className="btn btn-primary"
             onClick={() => {
-              if (!f.name.trim()) return;
+              if (!f.name.trim()) {
+                setSaveError("Client / organization name is required before this can be saved.");
+                return;
+              }
+              setSaveError("");
               const actionCompleted = item && item.nextAction && item.nextAction !== f.nextAction;
               const noteText = f.notes.trim();
               let nextNotesHistory = f.notesHistory || [];
@@ -1862,6 +2022,7 @@ function TenderModal({ tender, partners, me, prefillTitle, onSave, onDelete, onC
         }
   );
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [saveError, setSaveError] = useState("");
   const setScore = (k) => (e) => setF({ ...f, scores: { ...f.scores, [k]: Number(e.target.value) } });
   const total = tenderScore(f);
   const noBid = total < 50;
@@ -1978,15 +2139,20 @@ function TenderModal({ tender, partners, me, prefillTitle, onSave, onDelete, onC
           />
         </div>
         <div className="sheet-actions">
+          {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {tender && (
-            <button className="btn btn-ghost btn-danger" onClick={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
               Delete
-            </button>
+            </ConfirmButton>
           )}
           <button
             className="btn btn-primary"
             onClick={() => {
-              if (!f.title.trim()) return;
+              if (!f.title.trim()) {
+                setSaveError("Tender title is required before this can be saved.");
+                return;
+              }
+              setSaveError("");
               const prevHistory = f.stageHistory || [];
               const stageChanged = !tender || tender.stage !== f.stage;
               const actionCompleted = tender && tender.nextAction && tender.nextAction !== f.nextAction;
@@ -2109,10 +2275,12 @@ function CostOfBDPage({ store }) {
 
 // Practice Areas — the list every prospect's "Practice area" dropdown pulls from, editable here
 // instead of needing a code change every time the firm picks up a new practice.
-function PracticeAreasPage({ store }) {
-  const [items, setItems] = useState([...store.practices]);
+// A reusable editable list — practice areas, sectors, or whatever else needs the same "add one,
+// remove one, existing records keep their old tag" treatment.
+function EditableListPage({ initial, note, addPlaceholder, addLabel, saveLabel, onSave }) {
+  const [items, setItems] = useState([...initial]);
   const [newItem, setNewItem] = useState("");
-  const dirty = JSON.stringify(items) !== JSON.stringify(store.practices);
+  const dirty = JSON.stringify(items) !== JSON.stringify(initial);
 
   const add = () => {
     const v = newItem.trim();
@@ -2124,39 +2292,78 @@ function PracticeAreasPage({ store }) {
 
   return (
     <>
-      <p className="insight-note">
-        The practice areas every prospect and client get categorized under. Add one when the firm picks up a new area — Aviation, M&amp;A, whatever's next — remove one that's no longer used. Existing records keep whatever they were already tagged with even if it's removed from this list.
-      </p>
+      <p className="insight-note">{note}</p>
       <div className="cost-table">
         {items.map((p, i) => (
           <div key={p} className="cost-row">
             <span className="cost-row-label">{p}</span>
-            <button type="button" className="icon-btn" onClick={() => remove(i)} aria-label={`Remove ${p}`}>✕</button>
+            <ConfirmButton className="icon-btn" ariaLabel={`Remove ${p}`} onConfirm={() => remove(i)}>✕</ConfirmButton>
           </div>
         ))}
-        {items.length === 0 && <p className="empty">No practice areas left — add at least one below.</p>}
+        {items.length === 0 && <p className="empty">Nothing left — add at least one below.</p>}
       </div>
       <div className="watchlist-add" style={{ marginTop: 12 }}>
-        <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="e.g. Aviation" />
-        <button type="button" className="chip-btn" onClick={add}>+ Add practice area</button>
+        <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder={addPlaceholder} />
+        <button type="button" className="chip-btn" onClick={add}>{addLabel}</button>
       </div>
       <button
         className="btn btn-primary"
         disabled={!dirty || items.length === 0}
-        onClick={() => store.savePractices(items)}
+        onClick={() => onSave(items)}
         style={{ marginTop: 14 }}
       >
-        Save practice areas
+        {saveLabel}
       </button>
     </>
   );
 }
 
-// Settings — a menu of bespoke, firm-wide items. Starts with two; the pattern is meant to grow,
-// so each item is its own page rather than everything living flat on one screen.
+function PracticeAreasPage({ store }) {
+  return (
+    <EditableListPage
+      initial={store.practices}
+      note="The practice areas every prospect and client get categorized under. Add one when the firm picks up a new area — Aviation, M&A, whatever's next — remove one that's no longer used. Existing records keep whatever they were already tagged with even if it's removed from this list."
+      addPlaceholder="e.g. Aviation"
+      addLabel="+ Add practice area"
+      saveLabel="Save practice areas"
+      onSave={store.savePractices}
+    />
+  );
+}
+
+function SectorsPage({ store }) {
+  return (
+    <EditableListPage
+      initial={store.sectors}
+      note="The industries every prospect and client's 'Sector' dropdown pulls from. Add one the firm's client base has grown into, remove one that isn't used. Existing records keep whatever they were already tagged with even if it's removed from this list."
+      addPlaceholder="e.g. Aviation"
+      addLabel="+ Add sector"
+      saveLabel="Save sectors"
+      onSave={store.saveSectors}
+    />
+  );
+}
+
+function ReferralTypesPage({ store }) {
+  return (
+    <EditableListPage
+      initial={store.referralTypes}
+      note="The list a referral partner's 'Type' dropdown pulls from — the kind of professional they are, not what they refer. Existing records keep whatever they were already tagged with even if it's removed from this list."
+      addPlaceholder="e.g. Notary"
+      addLabel="+ Add referral type"
+      saveLabel="Save referral types"
+      onSave={store.saveReferralTypes}
+    />
+  );
+}
+
+// Settings — a menu of bespoke, firm-wide items. The pattern is meant to grow, so each item is its
+// own page rather than everything living flat on one screen.
 const SETTINGS_PAGES = [
   { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage },
   { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage },
+  { key: "sectors", label: "Sectors", desc: "The industry list prospects and clients get categorized under", Component: SectorsPage },
+  { key: "referralTypes", label: "Referral Types", desc: "The professions a referral partner can be tagged with", Component: ReferralTypesPage },
 ];
 
 function SettingsModal({ store, onClose }) {
@@ -2595,7 +2802,7 @@ export default function App() {
           <div className="card-list">
             {store.referrals.length === 0 && <p className="empty">No referral partners logged yet.</p>}
             {store.referrals
-              .filter((r) => matchesSearch(searchReferrals, [r.name, r.type, r.practiceFed]))
+              .filter((r) => matchesSearch(searchReferrals, [r.name, r.type, ...(Array.isArray(r.practiceFed) ? r.practiceFed : [r.practiceFed])]))
               .filter((r) => filterReferralsPartner === "all" || r.responsiblePartner === filterReferralsPartner)
               .slice()
               .sort((a, b) => (a.lastContact || "") < (b.lastContact || "") ? -1 : 1)
@@ -2604,6 +2811,7 @@ export default function App() {
                 const unseen = referralActivityCount(r) - (store.seenReferrals[r.id] || 0);
                 const owner = store.partners.find((p) => p.id === r.responsiblePartner);
                 const impact = referralImpact("referral", r.id, store);
+                const practiceFedTags = Array.isArray(r.practiceFed) ? r.practiceFed : (r.practiceFed ? [r.practiceFed] : []);
                 return (
                   <button key={r.id} className="card" onClick={() => setOpenReferral(r)}>
                     <div className="card-top">
@@ -2611,7 +2819,7 @@ export default function App() {
                     </div>
                     <div className="card-meta">
                       {r.type && <Pill>{r.type}</Pill>}
-                      {r.practiceFed && <Pill tone="owner">{r.practiceFed}</Pill>}
+                      {practiceFedTags.map((tag) => <Pill key={tag} tone="owner">{tag}</Pill>)}
                       {owner && <Pill tone="owner">{owner.name}</Pill>}
                       <UpdateBadge count={unseen} />
                       {impact.count > 0 && (
@@ -2668,6 +2876,7 @@ export default function App() {
           tenders={store.tenders}
           activity={store.activity}
           practices={store.practices}
+          sectors={store.sectors}
           me={me}
           prefillOrg={prospectPrefill}
           onSave={store.saveProspect}
@@ -2682,6 +2891,7 @@ export default function App() {
         <ClientModal
           item={openClient}
           partners={store.partners}
+          sectors={store.sectors}
           me={me}
           prefillName={clientPrefill}
           onSave={store.saveClient}
@@ -2697,6 +2907,8 @@ export default function App() {
           item={openReferral}
           prefillName={referralPrefill}
           partners={store.partners}
+          practices={store.practices}
+          referralTypes={store.referralTypes}
           me={me}
           onSave={store.saveReferral}
           onDelete={store.deleteReferral}
@@ -2897,7 +3109,7 @@ function WatchlistItemCard({ item, onRemove, onPromote, onReschedule }) {
     <div className="watchlist-item">
       <div className="watchlist-item-top">
         <span className="org">{item.organization}</span>
-        <button type="button" className="icon-btn" onClick={onRemove} aria-label="Remove">✕</button>
+        <ConfirmButton className="icon-btn" ariaLabel="Remove" onConfirm={onRemove}>✕</ConfirmButton>
       </div>
       {item.industry && <Pill>{item.industry}</Pill>}
       {item.note && <p className="watchlist-note">{item.note}</p>}
@@ -4120,8 +4332,9 @@ export function Style() {
       .sheet-head h3{ font-family:'Playfair Display',serif; margin:0; font-size:18px; }
       .icon-btn{ background:none; border:none; font-size:16px; color:var(--muted); }
       .sheet-body{ padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
-      .field{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--muted); font-weight:600; }
-      .field input, .field select, .field textarea{ font-family:inherit; font-size:16px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; }
+      .field{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--muted); font-weight:600; min-width:0; }
+      .field input, .field select, .field textarea{ font-family:inherit; font-size:16px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; width:100%; min-width:0; box-sizing:border-box; }
+      .field select{ text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
       .field input:focus, .field select:focus, .field textarea:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .input-mic-row{ display:flex; gap:8px; align-items:center; }
       .input-mic-row input, .input-mic-row textarea{ flex:1; min-width:0; }
@@ -4129,6 +4342,7 @@ export function Style() {
       .mic-btn-active{ background:var(--red); border-color:var(--red); color:#fff; animation:mic-pulse 1.1s ease-in-out infinite; }
       @keyframes mic-pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.55; } }
       .voice-error{ display:block; margin-top:6px; font-size:12px; color:var(--red); }
+      .save-error{ display:flex; align-items:center; gap:6px; background:#F7E3E3; color:var(--red); border-radius:8px; padding:9px 12px; font-size:12.5px; font-weight:600; margin-bottom:10px; }
       .voice-error-dark{ color:#F5B4B4; }
 
       .voice-fill-trigger{ width:100%; background:var(--cream); border:1px dashed var(--gold); color:var(--navy); font-weight:700; font-size:13.5px; padding:11px; border-radius:8px; }
@@ -4194,8 +4408,9 @@ export function Style() {
       .voice-panel .input-mic-row input:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.28); }
       .voice-panel .mic-btn{ width:46px; height:46px; background:var(--gold); border-color:var(--gold); color:var(--navy); font-size:17px; }
       .voice-panel .mic-btn-active{ background:var(--red); border-color:var(--red); color:#fff; }
-      .voice-panel-actions{ display:flex; gap:8px; }
+      .voice-panel-actions{ display:flex; gap:8px; flex-wrap:wrap; }
       .voice-panel-actions .chip-btn{ background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.3); }
+      .voice-panel-actions .chip-btn:disabled{ opacity:0.35; }
       .voice-panel-actions .btn-primary{ background:var(--gold); color:var(--navy); flex:1; padding:10px; border-radius:8px; font-weight:700; }
       .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
       .sheet-actions{ display:flex; gap:10px; padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); border-top:1px solid var(--line); flex:none; }
@@ -4203,6 +4418,12 @@ export function Style() {
       .btn-primary{ background:var(--navy); color:#fff; }
       .btn-ghost{ background:#fff; border:1px solid var(--line); color:var(--ink); flex:0 0 auto; padding:12px 16px; }
       .btn-danger{ color:var(--red); border-color:#EAD2D2; }
+      .confirm-inline{ display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+      .confirm-inline-text{ font-size:11px; color:var(--muted); font-weight:600; }
+      .chip-danger{ background:var(--red); color:#fff; }
+      .tag-picker{ display:flex; flex-wrap:wrap; gap:6px; }
+      .tag-chip{ font-size:12px; font-weight:600; padding:6px 12px; border-radius:999px; background:var(--cream); border:1px solid var(--line); color:var(--ink); }
+      .tag-chip-active{ background:var(--navy); border-color:var(--navy); color:#fff; }
 
       .stat-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
       .stat{ background:#fff; border:1px solid var(--line); border-left:4px solid var(--gold); border-radius:8px; padding:12px; }
