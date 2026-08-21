@@ -4523,6 +4523,103 @@ export function Style() {
         .stat-grid{ grid-template-columns:1fr; }
         .vault-grid{ grid-template-columns:1fr; }
       }
+
+      /* Phone-width screens (iPhone 15 family and similar, ~390-430px CSS width) — ~10% smaller
+         text across the UI for a less oversized feel on modern larger phones. Form fields
+         (input/select/textarea) are deliberately left untouched here: dropping any of them below
+         16px re-triggers iOS Safari's auto-zoom-on-focus, which was fixed earlier this project. */
+      @media (max-width: 430px) {
+        .boot h1{ font-size:23.5px; }
+        .who-identity{ font-size:11px; }
+        .link-btn{ font-size:11.5px; }
+        .fine{ font-size:10.5px; }
+        .brand-sub{ font-size:11px; }
+        .me-chip{ font-size:11px; }
+        .notif-bell{ font-size:12.5px; }
+        .notif-count{ font-size:9px; }
+        .notif-head{ font-size:14.5px; }
+        .notif-group-label{ font-size:10px; }
+        .notif-row-title{ font-size:11.5px; }
+        .tab{ font-size:11.5px; }
+        .tab-badge{ font-size:9.5px; }
+        .month-nav-label{ font-size:14.5px; }
+        .month-nav .icon-btn{ font-size:18px; }
+        .search-clear{ font-size:11.5px; }
+        .overdue-banner{ font-size:11px; }
+        .seg button{ font-size:11.5px; }
+        .stage-head{ font-size:11.5px; }
+        .stage-count{ font-size:11px; }
+        .empty{ font-size:11.5px; }
+        .org{ font-size:13px; }
+        .fee{ font-size:11px; }
+        .rail-pct{ font-size:10px; }
+        .pill{ font-size:10px; }
+        .update-badge{ font-size:10px; }
+        .referral-badge{ font-size:10px; }
+        .flag{ font-size:10px; }
+        .reminder-action{ font-size:11.5px; }
+        .fab{ font-size:12.5px; }
+        .section-intro{ font-size:11.5px; }
+        .sheet-head h3{ font-size:16px; }
+        .icon-btn{ font-size:14.5px; }
+        .field{ font-size:11px; }
+        .mic-btn{ font-size:13.5px; }
+        .voice-error{ font-size:11px; }
+        .save-error{ font-size:11px; }
+        .voice-fill-trigger{ font-size:12px; }
+        .collapsible-head{ font-size:12px; }
+        .collapsible-caret{ font-size:12.5px; }
+        .watchlist-head{ font-size:12px; }
+        .watchlist-count{ font-size:9.5px; }
+        .watchlist-note{ font-size:11px; }
+        .watchlist-checkback-field{ font-size:10.5px; }
+        .watchlist-checkback{ font-size:10px; }
+        .contact-link{ font-size:11px; }
+        .cost-row-label{ font-size:11px; }
+        .settings-menu-label{ font-size:12.5px; }
+        .settings-menu-desc{ font-size:10.5px; }
+        .settings-menu-caret{ font-size:16px; }
+        .cal-weekday-row{ font-size:9.5px; }
+        .cal-cell-num{ font-size:11px; }
+        .cal-cell-count{ font-size:8px; }
+        .active-filter-chip{ font-size:11px; }
+        .active-filter-chip button{ font-size:10.5px; }
+        .voice-panel-step{ font-size:10px; }
+        .voice-panel-label{ font-size:15.5px; }
+        .voice-panel .mic-btn{ font-size:15.5px; }
+        .btn{ font-size:12.5px; }
+        .confirm-inline-text{ font-size:10px; }
+        .tag-chip{ font-size:11px; }
+        .stat-value{ font-size:18px; }
+        .stat-label{ font-size:10.5px; }
+        .insight-card h4{ font-size:13.5px; }
+        .insight-note{ font-size:10.5px; }
+        .legend-row{ font-size:10.5px; }
+        .rank-row{ font-size:11.5px; }
+        .rank-num{ font-size:9.5px; }
+        .rank-num-name{ font-size:11px; }
+        .rank-sub{ font-size:9.5px; }
+        .rank-value{ font-size:11px; }
+        .corr-label{ font-size:11.5px; }
+        .corr-bar-tag{ font-size:9.5px; }
+        .corr-bar-value{ font-size:10.5px; }
+        .funnel-label{ font-size:10.5px; }
+        .funnel-count{ font-size:11px; }
+        .partner-row{ font-size:11px; }
+        .partner-head{ font-size:10px; }
+        .vault-head{ font-size:12px; }
+        .vault-item{ font-size:11px; }
+        .score-row-top{ font-size:11.5px; }
+        .score-verdict{ font-size:11px; }
+        .note-text{ font-size:11.5px; }
+        .mini-btn{ font-size:10.5px; }
+        .mini-tag{ font-size:10px; }
+        .suggest-row{ font-size:12px; }
+        .history-stage{ font-size:11.5px; }
+        .history-meta{ font-size:10.5px; }
+        .activity-top{ font-size:11.5px; }
+        .chip-btn{ font-size:11px; }
+      }
     `}</style>
   );
 }
