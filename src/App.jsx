@@ -4936,7 +4936,7 @@ export function Style() {
       .month-nav .icon-btn{ font-size:20px; color:var(--navy); padding:2px 8px; }
       .month-nav .icon-btn:disabled{ opacity:0.3; }
       .search-box-wrap{ position:relative; margin-bottom:10px; }
-      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:16px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
+      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
       .search-box::-webkit-search-cancel-button{ display:none; }
       .search-box:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .search-box::placeholder{ color:var(--muted); }
