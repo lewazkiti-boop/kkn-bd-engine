@@ -15,6 +15,56 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
  *    "kkn-clients"       -> [{...}]
  * ------------------------------------------------------------------ */
 
+/* ============================================================================
+ * MULTI-TENANCY MIGRATION NOTES — read this before wiring in a real backend
+ * ============================================================================
+ * This artifact runs as a single-firm app on window.storage: one flat,
+ * unauthenticated shared data space, no server-side access control. The
+ * notes below mark what's already structured to make a future multi-tenant
+ * rebuild easier, and — just as importantly — what is NOT solved here and
+ * must not be mistaken for having been solved.
+ *
+ * 1. RECORD TAGGING (done, low-risk, no behavior change today):
+ *    Every new partner/prospect/client/tender/referral/activity entry is
+ *    stamped with `firmId: CURRENT_FIRM_ID` at creation (see the relevant
+ *    save/add actions in useStorage). Today CURRENT_FIRM_ID is a constant,
+ *    so this is a no-op — nothing currently filters by it. It exists purely
+ *    so that "give every existing record a firmId" is a trivial one-time
+ *    migration later, rather than a schema redesign. When a real backend
+ *    exists, every read/write path needs an actual `WHERE firmId = ...`
+ *    scoped to the authenticated session — that filtering does not exist
+ *    yet and must be added, not assumed from the presence of the field.
+ *
+ * 2. FIRM-WIDE SETTINGS (not tagged the same way, different mechanism needed):
+ *    Practice Areas, Sectors, Referral Types, Next Action Templates, Cost of
+ *    BD, Monthly BD Targets are each a single shared config object, not an
+ *    array of records — firmId-per-item doesn't apply. In a multi-tenant
+ *    backend these need their own per-firm namespacing (e.g. a firm-scoped
+ *    storage key or table row), not the tagging pattern used for records.
+ *
+ * 3. IDENTITY vs AUTHORIZATION (already a clean seam — preserve it):
+ *    `me` (which partner you are) and `getPermissions(myPartner)` (what
+ *    that role can do) are already separate concerns in this code. That
+ *    split is exactly what a real login needs to plug into: replace how
+ *    `me` gets set, and every downstream permission check keeps working
+ *    unchanged. See the note at the `me` state declaration for specifics
+ *    on what "who's picking this up" actually is today.
+ *
+ * 4. WHAT IS NOT BUILT, AND SHOULD NOT BE ASSUMED TO BE:
+ *    - No authentication. Anyone with the app URL can select any partner's
+ *      name and act as them — there is no verification of identity at all.
+ *    - No write protection. Nothing stops a request from saving data "as"
+ *      a partner other than whoever is actually using the device.
+ *    - No data isolation between firms — there is only one firm's data,
+ *      full stop, and every partner/admin sees the entire shared space
+ *      (narrowed only by the UI-level ROLE_PERMISSIONS gates already built,
+ *      which are a display filter, not a security boundary).
+ *    Building convincing-looking fakes of any of the above would be worse
+ *    than leaving them undone, since they'd look like real security to
+ *    someone who didn't know to check.
+ * ========================================================================= */
+const CURRENT_FIRM_ID = "kkn"; // placeholder single-tenant ID — see notes above
+
 const DEFAULT_PARTNERS = [
   { id: "p-gerald", name: "Gerald Kiti", identity: "Technology / AI / Cybersecurity + Strategic Relationships" },
   { id: "p-a", name: "Partner A", identity: "Corporate & M&A" },
@@ -237,6 +287,41 @@ const VAULT_ITEMS = [
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
+
+// saveProspect (below, in useStorage) auto-creates a client the moment a prospect is saved as
+// Won — but that only fires for prospects that actually pass through that action. Anything that
+// sets the prospects/clients arrays directly (loading from storage, sample data, a future import)
+// bypasses it entirely, which is exactly how a won prospect can end up with no matching client.
+// This reconciles that after the fact: given a set of prospects and existing clients, it returns
+// clients with a record added for any won prospect that doesn't already have one. It never edits
+// or note-annotates an existing client (that note-on-repeat-win flourish belongs to the live,
+// single-event path in saveProspect, not a bulk backfill) — it only ever adds what's missing.
+function ensureClientsForWonProspects(prospects, clients) {
+  const result = [...(clients || [])];
+  (prospects || [])
+    .filter((p) => p.status === "won" && (p.organization || "").trim())
+    .forEach((p) => {
+      const orgKey = p.organization.trim().toLowerCase();
+      const alreadyExists = result.some((c) => (c.name || "").trim().toLowerCase() === orgKey);
+      if (alreadyExists) return;
+      result.push({
+        id: uid(),
+        firmId: p.firmId || CURRENT_FIRM_ID,
+        name: p.organization,
+        sector: p.sector || "",
+        clientType: p.clientType || CLIENT_TYPES[0],
+        instructedOn: p.opportunity || "",
+        potentialNeeds: "",
+        responsiblePartner: p.responsiblePartner || "",
+        lastContact: todayISO(),
+        nextAction: "",
+        nextActionDate: "",
+        notes: "",
+        notesHistory: [],
+      });
+    });
+  return result;
+}
 const monthKey = (d) => (d || todayISO()).slice(0, 7);
 const shiftMonthKey = (mk, delta) => {
   const [y, m] = mk.split("-").map(Number);
@@ -282,6 +367,21 @@ const buildMonthGrid = (mk) => {
   return weeks;
 };
 const fmtKES = (n) => (n ? `KES ${Number(n).toLocaleString()}` : "—");
+// Same formatting as fmtKES, but for figures where zero is a genuine, meaningful answer (nothing
+// collected yet, nothing outstanding) rather than an empty/unset field — those should read as
+// "KES 0", not fmtKES's "—", which would wrongly look like missing data instead of a real zero.
+const fmtKESExact = (n) => `KES ${Number(n || 0).toLocaleString()}`;
+// A small "vs last month" indicator for Scorecard's monthly-flow numbers (Won, qualified
+// opportunities, proposals sent, spend) — deliberately not applied to Live pipeline value, since
+// that's a right-now snapshot rather than a monthly flow, and there's no historical snapshot to
+// honestly compare it against.
+function monthTrend(current, previous) {
+  if (!previous && !current) return null;
+  if (!previous) return { text: "New this month", tone: "up" };
+  const pct = Math.round(((current - previous) / previous) * 100);
+  if (pct === 0) return { text: "Flat vs last month", tone: "flat" };
+  return { text: `${pct > 0 ? "↑" : "↓"} ${Math.abs(pct)}% vs last month`, tone: pct > 0 ? "up" : "down" };
+}
 // A referral partner's name plus their affiliated organization, e.g. "Amina — KMP & Associates" —
 // falls back to the bare name when no institution is set (including on older, pre-field records).
 const referralDisplayName = (r) => (r?.institution?.trim() ? `${r.name} — ${r.institution.trim()}` : r?.name || "");
@@ -295,6 +395,22 @@ const individualOccupations = (clients, prospects) => {
   [...(clients || []), ...(prospects || [])].forEach((r) => {
     if (r.clientType !== "Individual") return;
     const val = (r.sector || "").trim();
+    if (!val) return;
+    const key = val.toLowerCase();
+    if (!seen.has(key)) seen.set(key, val);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+};
+
+// Type-ahead suggestions for the Position field on institutional contacts — "CFO", "Managing
+// Director", "General Counsel" repeat constantly across completely unrelated organizations, so
+// this is an even cleaner fit than Occupation: purely organic, no curated starter list needed,
+// since job titles are inherently short and don't carry the "bespoke paragraph" risk Next Action
+// has to guard against.
+const positionSuggestions = (clients, prospects) => {
+  const seen = new Map();
+  [...(clients || []), ...(prospects || [])].forEach((r) => {
+    const val = (r.position || "").trim();
     if (!val) return;
     const key = val.toLowerCase();
     if (!seen.has(key)) seen.set(key, val);
@@ -585,7 +701,12 @@ function useStorage() {
         setActivity(ac);
         setTenders(td);
         setVault(vl);
-        setClients(cl);
+        // Backfills any won prospect that's missing a matching client — covers historical data
+        // saved before this rule existed, on top of the live path in saveProspect that already
+        // handles it for every win going forward.
+        const reconciledClients = ensureClientsForWonProspects(pr, cl);
+        setClients(reconciledClients);
+        if (reconciledClients.length !== cl.length) persist("kkn-clients", reconciledClients);
         setSeenProspects(sp);
         setSeenClients(sc);
         setSeenReferrals(sr);
@@ -689,7 +810,7 @@ function useStorage() {
         });
       },
       addPartner: (p) => {
-        const next = [...partners, { id: uid(), ...p }];
+        const next = [...partners, { id: uid(), firmId: p.firmId || CURRENT_FIRM_ID, ...p }];
         setPartners(next);
         persist("kkn-partners", next);
       },
@@ -703,7 +824,7 @@ function useStorage() {
         const exists = Boolean(prev);
         const next = exists
           ? prospects.map((x) => (x.id === p.id ? p : x))
-          : [...prospects, p];
+          : [...prospects, { firmId: p.firmId || CURRENT_FIRM_ID, ...p }];
         setProspects(next);
         persist("kkn-prospects", next);
 
@@ -724,6 +845,7 @@ function useStorage() {
                 ...clients,
                 {
                   id: uid(),
+                  firmId: p.firmId || CURRENT_FIRM_ID,
                   name: p.organization,
                   sector: p.sector || "",
                   clientType: p.clientType || CLIENT_TYPES[0],
@@ -750,7 +872,7 @@ function useStorage() {
         const exists = referrals.some((x) => x.id === r.id);
         const next = exists
           ? referrals.map((x) => (x.id === r.id ? r : x))
-          : [...referrals, r];
+          : [...referrals, { firmId: r.firmId || CURRENT_FIRM_ID, ...r }];
         setReferrals(next);
         persist("kkn-referrals", next);
       },
@@ -760,7 +882,7 @@ function useStorage() {
         persist("kkn-referrals", next);
       },
       logActivity: (partnerId, type, subject, cost) => {
-        const next = [...activity, { id: uid(), partnerId, type, date: todayISO(), subject: subject || "", cost: Number(cost) || 0 }];
+        const next = [...activity, { id: uid(), firmId: CURRENT_FIRM_ID, partnerId, type, date: todayISO(), subject: subject || "", cost: Number(cost) || 0 }];
         setActivity(next);
         persist("kkn-activity", next);
       },
@@ -834,7 +956,7 @@ function useStorage() {
       },
       saveTender: (t) => {
         const exists = tenders.some((x) => x.id === t.id);
-        const next = exists ? tenders.map((x) => (x.id === t.id ? t : x)) : [...tenders, t];
+        const next = exists ? tenders.map((x) => (x.id === t.id ? t : x)) : [...tenders, { firmId: t.firmId || CURRENT_FIRM_ID, ...t }];
         setTenders(next);
         persist("kkn-tenders", next);
       },
@@ -850,7 +972,7 @@ function useStorage() {
       },
       saveClient: (c) => {
         const exists = clients.some((x) => x.id === c.id);
-        const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, c];
+        const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, { firmId: c.firmId || CURRENT_FIRM_ID, ...c }];
         setClients(next);
         persist("kkn-clients", next);
       },
@@ -861,15 +983,16 @@ function useStorage() {
       },
       loadSampleData: async () => {
         const sample = buildSampleData();
+        const reconciledClients = ensureClientsForWonProspects(sample.prospects, sample.clients);
         setReferrals(sample.referrals);
-        setClients(sample.clients);
+        setClients(reconciledClients);
         setTenders(sample.tenders);
         setVault(sample.vault);
         setProspects(sample.prospects);
         setActivity(sample.activity);
         await Promise.all([
           persist("kkn-referrals", sample.referrals),
-          persist("kkn-clients", sample.clients),
+          persist("kkn-clients", reconciledClients),
           persist("kkn-tenders", sample.tenders),
           persist("kkn-tender-vault", sample.vault),
           persist("kkn-prospects", sample.prospects),
@@ -934,6 +1057,22 @@ function StageRail({ stage, showLabel }) {
 // How much history/notes a record carries — compared against each partner's own "last seen"
 // count (stored locally, per device) to decide whether an update badge should show.
 const prospectActivityCount = (p) => (p.statusHistory?.length || 0) + (p.notesHistory?.length || 0);
+// A won deal's value and what's actually been collected against it are two different numbers —
+// billing lags matter completion, partial payments come in over time. This sums a dated log of
+// payments rather than one editable total, so there's a real record of when each payment landed.
+const paymentsReceived = (p) => (p.payments || []).reduce((a, x) => a + (Number(x.amount) || 0), 0);
+// Three different numbers, deliberately kept distinct: Estimated (the guess, made while this is
+// still a prospect) → Agreed (what was actually signed, once won — can differ from the estimate)
+// → Collected (paymentsReceived, above). Everywhere the app needs "what is this deal worth," it
+// should ask this function, not read estimatedFee directly — that field is frozen at whatever
+// guess existed before the deal closed, and once something is won, the agreed figure (if entered)
+// is the truth, with the original estimate as a fallback for a won deal nobody's re-priced yet.
+const effectiveDealValue = (p) => {
+  if (p.status === "won" && p.agreedValue !== undefined && p.agreedValue !== "" && p.agreedValue !== null) {
+    return Number(p.agreedValue) || 0;
+  }
+  return Number(p.estimatedFee) || 0;
+};
 const clientActivityCount = (c) => c.notesHistory?.length || 0;
 const referralActivityCount = (r) => r.notesHistory?.length || 0;
 const tenderActivityCount = (t) => (t.stageHistory?.length || 0) + (t.notesHistory?.length || 0);
@@ -980,7 +1119,7 @@ function referredProspects(kind, id, store) {
 function referralImpact(kind, id, store) {
   const prospects = referredProspects(kind, id, store);
   const won = prospects.filter((p) => p.status === "won");
-  const wonValue = won.reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+  const wonValue = won.reduce((a, p) => a + effectiveDealValue(p), 0);
   const pipelineValue = prospects
     .filter((p) => !["won", "lost"].includes(p.status))
     .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
@@ -1000,7 +1139,7 @@ function clientMatters(clientName, prospects) {
 function clientValue(clientName, prospects) {
   const matters = clientMatters(clientName, prospects);
   const won = matters.filter((p) => p.status === "won");
-  const wonValue = won.reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+  const wonValue = won.reduce((a, p) => a + effectiveDealValue(p), 0);
   const pipelineValue = matters
     .filter((p) => !["won", "lost"].includes(p.status))
     .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
@@ -1084,28 +1223,48 @@ const matchesSearch = (query, fields) => {
   return fields.some((f) => (f || "").toString().toLowerCase().includes(q));
 };
 
-function ProspectCard({ p, partners, seenMap, onOpen, permissions = ROLE_PERMISSIONS.partner }) {
+function ProspectCard({ p, partners, clients, seenMap, onOpen, permissions = ROLE_PERMISSIONS.partner, onArchiveToggle }) {
   const overdue = p.nextActionDate && daysBetween(p.nextActionDate, todayISO()) > 0;
   const stale = p.lastContact && daysBetween(p.lastContact, todayISO()) >= 14;
   const owner = partners.find((x) => x.id === p.responsiblePartner);
   const unseen = prospectActivityCount(p) - (seenMap?.[p.id] || 0);
+  const canArchive = onArchiveToggle && (p.status === "won" || p.status === "lost");
+  const outstanding = p.status === "won" ? effectiveDealValue(p) - paymentsReceived(p) : 0;
+  // Live name match, same check the "matches existing client" panel in the editor uses — not
+  // dependent on whether Source was correctly set to "Repeat business" at data-entry time, so it
+  // self-corrects even for older records or a mis-picked source.
+  const orgKey = (p.organization || "").trim().toLowerCase();
+  const isRepeatBusiness = orgKey && (clients || []).some((c) => (c.name || "").trim().toLowerCase() === orgKey);
   return (
     <button className="card" onClick={() => onOpen(p)}>
       <div className="card-top">
         <span className="org">{p.organization || "Unnamed prospect"}</span>
-        {permissions.seeAmounts && <span className="fee">{fmtKES(p.estimatedFee)}</span>}
+        {permissions.seeAmounts && <span className="fee">{fmtKES(effectiveDealValue(p))}</span>}
       </div>
       <StageRail stage={p.status} showLabel={permissions.seeMetrics} />
       <div className="card-meta">
         <Pill>{p.practiceArea || "—"}</Pill>
         {owner && <Pill tone="owner">{owner.name}</Pill>}
+        {isRepeatBusiness && <Pill tone="score">🔁 Repeat business</Pill>}
         {permissions.seeMetrics && p.probability != null && <Pill tone="prob">{p.probability}%</Pill>}
         <UpdateBadge count={unseen} />
+        {canArchive && (
+          <button
+            type="button"
+            className="archive-badge"
+            onClick={(e) => { e.stopPropagation(); onArchiveToggle(p); }}
+          >
+            {p.archived ? "↩ Unarchive" : "🗄 Archive"}
+          </button>
+        )}
       </div>
-      {(overdue || stale) && (
+      {(overdue || stale || (permissions.seeAmounts && outstanding > 0)) && (
         <div className="flags">
           {overdue && <span className="flag flag-red">Follow-up overdue</span>}
           {stale && !overdue && <span className="flag flag-amber">No contact 14+ days</span>}
+          {permissions.seeAmounts && outstanding > 0 && (
+            <span className="flag flag-amber">{fmtKES(outstanding)} outstanding</span>
+          )}
         </div>
       )}
     </button>
@@ -1305,6 +1464,45 @@ function NoteLog({ notes, partners }) {
   );
 }
 
+// Deal value (what was won) and amount collected (what's actually come in) are different things —
+// this shows both, plus the dated history of each individual payment, since collections against a
+// won matter come in over time rather than as a single lump sum.
+function PaymentLog({ payments, dealValue, partners }) {
+  const received = paymentsReceived({ payments });
+  const outstanding = dealValue - received;
+  const rows = [...(payments || [])].reverse();
+  // fmtKES shows "—" for zero because in most of the app zero means "not set yet" (an empty fee
+  // field). Here zero is a real, meaningful answer — nothing has been collected — so it needs to
+  // say "KES 0" plainly via fmtKESExact rather than borrow fmtKES's "unset" dash.
+  const receivedDisplay = fmtKESExact(received);
+  return (
+    <div className="history">
+      <div className="vault-head" style={{ marginBottom: 8 }}>
+        <span>Payments received</span>
+        <span className="stat-label">{receivedDisplay} of {fmtKES(dealValue)} collected</span>
+      </div>
+      {outstanding > 0 && (
+        <p className="insight-note" style={{ marginBottom: rows.length ? 10 : 0 }}>
+          {fmtKES(outstanding)} still outstanding on this matter.
+        </p>
+      )}
+      {rows.length > 0 && (
+        <div className="history-list">
+          {rows.map((pmt, i) => {
+            const who = partners.find((p) => p.id === pmt.partnerId);
+            return (
+              <div key={pmt.id || i} className="note-row">
+                <div className="note-text">{fmtKES(Number(pmt.amount) || 0)}{pmt.note ? ` — ${pmt.note}` : ""}</div>
+                <div className="history-meta">{pmt.date}{who ? ` · ${who.name}` : ""}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Interleaves stage changes with matched Scorecard touches, so it's visible which logged activity
 // sat right before each stage jump — the closest thing to "what was the turning point" this data
 // model can honestly show, given activity subjects are free text rather than a hard link.
@@ -1420,13 +1618,18 @@ function SuggestInput({ value, onChange, suggestions, placeholder, autoFocus }) 
   );
 }
 
-// A single tap that actually opens the phone/email sheet — the OS already lets you select text
-// and get a "Call" option, but nothing on screen hints that's possible. This makes it visible.
+// A single tap that actually opens the phone/message/WhatsApp/email sheet — the OS already lets
+// you select text and get a "Call" option, but nothing on screen hints that's possible. This makes
+// it visible. Call, Message, and WhatsApp all key off the same phone number; Email keys off email.
 function ContactLinkRow({ phone, email }) {
   if (!phone && !email) return null;
+  const dialDigits = phone ? phone.replace(/[^\d+]/g, "") : "";
+  const waDigits = phone ? phone.replace(/[^\d]/g, "") : ""; // wa.me wants digits only, no leading +
   return (
     <div className="contact-link-row">
-      {phone && <a className="contact-link" href={`tel:${phone.replace(/[^\d+]/g, "")}`}>📞 Call</a>}
+      {phone && <a className="contact-link" href={`tel:${dialDigits}`}>📞 Call</a>}
+      {phone && <a className="contact-link" href={`sms:${dialDigits}`}>💬 Message</a>}
+      {phone && <a className="contact-link" href={`https://wa.me/${waDigits}`}>🟢 WhatsApp</a>}
       {email && <a className="contact-link" href={`mailto:${email}`}>✉️ Email</a>}
     </div>
   );
@@ -1655,12 +1858,13 @@ const REFERRAL_VOICE_FIELDS = [
   { key: "notes", label: "Notes", placeholder: "Context" },
 ];
 
-function ProspectModal({ prospect, partners, referrals, clients, prospects, tenders, activity, practices, sectors, occupations, organizations, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ProspectModal({ prospect, partners, referrals, clients, prospects, tenders, activity, practices, sectors, occupations, organizations, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     prospect
       ? {
           ...prospect,
           clientType: prospect.clientType || CLIENT_TYPES[0],
+          agreedValue: prospect.agreedValue ?? "",
           notes: "",
           notesHistory:
             prospect.notesHistory ||
@@ -1678,6 +1882,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           clientType: CLIENT_TYPES[0],
           opportunity: "",
           estimatedFee: "",
+          agreedValue: "",
           source: prefillOrg ? "Logged activity" : "",
           sourceDetailId: "",
           relationshipStrength: "Warm",
@@ -1687,6 +1892,8 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           responsiblePartner: partners[0]?.id || "",
           probability: 25,
           status: "target",
+          archived: false,
+          payments: [],
           notes: "",
           notesHistory: [],
           statusHistory: [],
@@ -1722,6 +1929,21 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
   const voiceSupported = hasVoiceSupport();
   const [otherSource, setOtherSource] = useState(Boolean(f.source) && !SOURCES.includes(f.source));
   const [showContact, setShowContact] = useState(Boolean(f.contactPhone || f.contactEmail));
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
+  // Whether the "was this won at the estimate, or a different agreed amount?" prompt has been
+  // resolved this session — starts true if there's already an agreed value on record (nothing to
+  // ask), so the prompt only ever appears once per genuinely unresolved deal, not on every open.
+  const [agreedValuePrompted, setAgreedValuePrompted] = useState(
+    f.agreedValue !== "" && f.agreedValue !== undefined && f.agreedValue !== null
+  );
+  const [focusAgreedInput, setFocusAgreedInput] = useState(false);
+  // Existing prospects collapse the rarely-changing identity fields (client type, organization,
+  // contact, position, sector, practice area, opportunity, estimated fee, source, contact details)
+  // into a compact summary — Pipeline stage, Probability, Relationship strength, Last contact, Next
+  // action, and everything Won-related stay live below, since those are what actually move as a
+  // deal progresses. New prospects have nothing to summarize yet, so start expanded.
+  const [editingDetails, setEditingDetails] = useState(!prospect);
 
   // When the organization just typed matches an existing client, pull contact details forward
   // from that client's most recent matter — same institution, likely the same or a related contact
@@ -1758,157 +1980,179 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
-          {voiceSupported && (
-            voiceFillOpen ? (
-              <VoiceFillPanel fields={PROSPECT_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
-            ) : (
-              <button type="button" className="voice-fill-trigger" onClick={() => setVoiceFillOpen(true)}>
-                🎤 Fill by voice
-              </button>
-            )
-          )}
-          <Field label="Client type">
-            <select value={f.clientType} onChange={set("clientType")}>
-              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </Field>
-          <Field label={f.clientType === "Individual" ? "Full name" : "Organization"}>
-            <SuggestInput
-              value={f.organization}
-              onChange={set("organization")}
-              suggestions={organizations}
-              placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Developers Ltd"}
-            />
-          </Field>
-          {matchedClient && (
-            <div className="existing-client-note">
-              <span className="existing-client-tag">✓ Matches an existing client — this is a new matter for them, not a new relationship</span>
-              {(permissions.seeAmounts || permissions.seeMetrics) && matchedClientValue && (
-                <div className="existing-client-stats">
-                  {permissions.seeMetrics && (
-                    <span>{matchedClientValue.matterCount} matter{matchedClientValue.matterCount === 1 ? "" : "s"} total</span>
-                  )}
-                  {permissions.seeAmounts && <span>{fmtKES(matchedClientValue.wonValue)} won so far</span>}
-                  {permissions.seeAmounts && matchedClientValue.pipelineValue > 0 && (
-                    <span>{fmtKES(matchedClientValue.pipelineValue)} still in pipeline</span>
+          {!editingDetails ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org">{f.organization || "Unnamed prospect"}</span>
+                <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
+              </div>
+              <div className="card-meta">
+                <Pill>{f.practiceArea || "—"}</Pill>
+                {matchedClient && <Pill tone="score">🔁 Repeat business</Pill>}
+                {permissions.seeAmounts && Number(f.estimatedFee) > 0 && (
+                  <Pill tone="owner">{fmtKES(f.estimatedFee)}</Pill>
+                )}
+              </div>
+              {f.opportunity && <p className="reminder-action">{f.opportunity}</p>}
+              <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />
+            </div>
+          ) : (
+            <>
+              {voiceSupported && (
+                voiceFillOpen ? (
+                  <VoiceFillPanel fields={PROSPECT_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
+                ) : (
+                  <button type="button" className="voice-fill-trigger" onClick={() => setVoiceFillOpen(true)}>
+                    🎤 Fill by voice
+                  </button>
+                )
+              )}
+              <Field label="Client type">
+                <select value={f.clientType} onChange={set("clientType")}>
+                  {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
+                </select>
+              </Field>
+              <Field label={f.clientType === "Individual" ? "Full name" : "Organization"}>
+                <SuggestInput
+                  value={f.organization}
+                  onChange={set("organization")}
+                  suggestions={organizations}
+                  placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Developers Ltd"}
+                />
+              </Field>
+              {matchedClient && (
+                <div className="existing-client-note">
+                  <span className="existing-client-tag">✓ Matches an existing client — this is a new matter for them, not a new relationship</span>
+                  {(permissions.seeAmounts || permissions.seeMetrics) && matchedClientValue && (
+                    <div className="existing-client-stats">
+                      {permissions.seeMetrics && (
+                        <span>{matchedClientValue.matterCount} matter{matchedClientValue.matterCount === 1 ? "" : "s"} total</span>
+                      )}
+                      {permissions.seeAmounts && <span>{fmtKES(matchedClientValue.wonValue)} won so far</span>}
+                      {permissions.seeAmounts && matchedClientValue.pipelineValue > 0 && (
+                        <span>{fmtKES(matchedClientValue.pipelineValue)} still in pipeline</span>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
-            </div>
-          )}
-          {f.clientType !== "Individual" && (
-            <div className="row2">
-              <Field label="Contact">
-                <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+              {f.clientType !== "Individual" && (
+                <div className="row2">
+                  <Field label="Contact">
+                    <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                  </Field>
+                  <Field label="Position">
+                    <SuggestInput value={f.position} onChange={set("position")} suggestions={positions} placeholder="CFO" />
+                  </Field>
+                </div>
+              )}
+              <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
+                {showContact
+                  ? "− Hide contact details"
+                  : (f.contactPhone || f.contactEmail) ? "👁 View contact details" : "+ Add contact details (optional)"}
+              </button>
+              {showContact && (
+                <div className="row2">
+                  <Field label="Phone">
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
+                  </Field>
+                </div>
+              )}
+              {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
+              <div className="row2">
+                {f.clientType === "Individual" ? (
+                  <Field label="Occupation / role (optional)">
+                    <SuggestInput
+                      value={f.sector}
+                      onChange={set("sector")}
+                      suggestions={occupations}
+                      placeholder="e.g. Business owner, retired banker"
+                    />
+                  </Field>
+                ) : (
+                  <Field label="Sector">
+                    <select value={f.sector} onChange={set("sector")}>
+                      <option value="">— Select —</option>
+                      {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
+                    </select>
+                  </Field>
+                )}
+                <Field label="Practice area">
+                  <select value={f.practiceArea} onChange={set("practiceArea")}>
+                    {practices.map((x) => <option key={x}>{x}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Opportunity">
+                <input value={f.opportunity} onChange={set("opportunity")} placeholder="Acquisition / development due diligence" />
               </Field>
-              <Field label="Position">
-                <input value={f.position} onChange={set("position")} placeholder="CFO" />
-              </Field>
-            </div>
-          )}
-          <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
-            {showContact
-              ? "− Hide contact details"
-              : (f.contactPhone || f.contactEmail) ? "👁 View contact details" : "+ Add contact details (optional)"}
-          </button>
-          {showContact && (
-            <div className="row2">
-              <Field label="Phone">
-                <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
-              </Field>
-              <Field label="Email">
-                <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
-              </Field>
-            </div>
-          )}
-          {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
-          <div className="row2">
-            {f.clientType === "Individual" ? (
-              <Field label="Occupation / role (optional)">
-                <SuggestInput
-                  value={f.sector}
-                  onChange={set("sector")}
-                  suggestions={occupations}
-                  placeholder="e.g. Business owner, retired banker"
-                />
-              </Field>
-            ) : (
-              <Field label="Sector">
-                <select value={f.sector} onChange={set("sector")}>
-                  <option value="">— Select —</option>
-                  {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
-                </select>
-              </Field>
-            )}
-            <Field label="Practice area">
-              <select value={f.practiceArea} onChange={set("practiceArea")}>
-                {practices.map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="Opportunity">
-            <input value={f.opportunity} onChange={set("opportunity")} placeholder="Acquisition / development due diligence" />
-          </Field>
-          {permissions.seeAmounts ? (
-            <div className="row2">
-              <Field label="Estimated fee (KES)">
-                <input type="number" value={f.estimatedFee} onChange={set("estimatedFee")} placeholder="600000" />
-              </Field>
-              <Field label="Source">
-                <select
-                  value={otherSource ? "Other" : (SOURCES.includes(f.source) ? f.source : "")}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === "Other") {
-                      setOtherSource(true);
-                      setF({ ...f, sourceDetailId: "" });
-                    } else {
-                      setOtherSource(false);
-                      setF({ ...f, source: v, sourceDetailId: "" });
-                    }
-                  }}
-                >
-                  <option value="">Select a source…</option>
-                  {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-                  <option value="Other">Other</option>
-                </select>
-              </Field>
-            </div>
-          ) : (
-            <Field label="Source">
-              <select
-                value={otherSource ? "Other" : (SOURCES.includes(f.source) ? f.source : "")}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === "Other") {
-                    setOtherSource(true);
-                    setF({ ...f, sourceDetailId: "" });
-                  } else {
-                    setOtherSource(false);
-                    setF({ ...f, source: v, sourceDetailId: "" });
-                  }
-                }}
-              >
-                <option value="">Select a source…</option>
-                {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
-                <option value="Other">Other</option>
-              </select>
-            </Field>
-          )}
-          {otherSource && (
-            <Field label="Describe the source">
-              <input value={f.source} onChange={set("source")} placeholder="e.g. Chamber of Commerce mixer" autoFocus />
-            </Field>
-          )}
-          {linkedSourceConfig && (
-            <Field label={linkedSourceConfig.fieldLabel}>
-              <select value={f.sourceDetailId} onChange={set("sourceDetailId")}>
-                <option value="">Select…</option>
-                {linkedSourceConfig.list.map((item) => (
-                  <option key={item.id} value={item.id}>{linkedSourceConfig.getLabel(item)}</option>
-                ))}
-              </select>
-            </Field>
+              {permissions.seeAmounts ? (
+                <>
+                  <div className="row2">
+                    <Field label={f.status === "won" ? "Original estimate (KES)" : "Estimated fee (KES)"}>
+                      <input type="number" value={f.estimatedFee} onChange={set("estimatedFee")} placeholder="600000" />
+                    </Field>
+                    <Field label="Source">
+                      <select
+                        value={otherSource ? "Other" : (SOURCES.includes(f.source) ? f.source : "")}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "Other") {
+                            setOtherSource(true);
+                            setF({ ...f, sourceDetailId: "" });
+                          } else {
+                            setOtherSource(false);
+                            setF({ ...f, source: v, sourceDetailId: "" });
+                          }
+                        }}
+                      >
+                        <option value="">Select a source…</option>
+                        {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                        <option value="Other">Other</option>
+                      </select>
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <Field label="Source">
+                  <select
+                    value={otherSource ? "Other" : (SOURCES.includes(f.source) ? f.source : "")}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === "Other") {
+                        setOtherSource(true);
+                        setF({ ...f, sourceDetailId: "" });
+                      } else {
+                        setOtherSource(false);
+                        setF({ ...f, source: v, sourceDetailId: "" });
+                      }
+                    }}
+                  >
+                    <option value="">Select a source…</option>
+                    {SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                    <option value="Other">Other</option>
+                  </select>
+                </Field>
+              )}
+              {otherSource && (
+                <Field label="Describe the source">
+                  <input value={f.source} onChange={set("source")} placeholder="e.g. Chamber of Commerce mixer" autoFocus />
+                </Field>
+              )}
+              {linkedSourceConfig && (
+                <Field label={linkedSourceConfig.fieldLabel}>
+                  <select value={f.sourceDetailId} onChange={set("sourceDetailId")}>
+                    <option value="">Select…</option>
+                    {linkedSourceConfig.list.map((item) => (
+                      <option key={item.id} value={item.id}>{linkedSourceConfig.getLabel(item)}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+            </>
           )}
           {permissions.seeMetrics ? (
             <div className="row2">
@@ -1961,6 +2205,86 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
             </Field>
           </div>
           <StageRail stage={f.status} showLabel={permissions.seeMetrics} />
+          {f.status === "won" && permissions.seeAmounts && (
+            !agreedValuePrompted ? (
+              Number(f.estimatedFee) > 0 ? (
+                <div className="agreed-value-prompt">
+                  <p className="agreed-value-prompt-text">
+                    This was estimated at <strong>{fmtKES(f.estimatedFee)}</strong>. Now that it's won — is that still the agreed value, or was a different amount actually agreed?
+                  </p>
+                  <div className="agreed-value-prompt-actions">
+                    <button
+                      type="button"
+                      className="chip-btn"
+                      onClick={() => { setF({ ...f, agreedValue: f.estimatedFee }); setAgreedValuePrompted(true); }}
+                    >
+                      Same as estimated
+                    </button>
+                    <button type="button" className="chip-btn chip-ghost" onClick={() => { setAgreedValuePrompted(true); setFocusAgreedInput(true); }}>
+                      Different amount
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="agreed-value-prompt">
+                  <p className="agreed-value-prompt-text">
+                    There's no estimated value on record for this deal. What was actually agreed?
+                  </p>
+                  <button type="button" className="chip-btn" onClick={() => { setAgreedValuePrompted(true); setFocusAgreedInput(true); }}>
+                    Enter agreed value
+                  </button>
+                </div>
+              )
+            ) : (
+              <Field label="Agreed value (KES)">
+                <input type="number" value={f.agreedValue} onChange={set("agreedValue")} placeholder="600000" autoFocus={focusAgreedInput} />
+              </Field>
+            )
+          )}
+          {(f.status === "won" || f.status === "lost") && (
+            <button
+              type="button"
+              className="voice-fill-trigger"
+              onClick={() => setF({ ...f, archived: !f.archived })}
+            >
+              {f.archived ? "↩ Restore from archive" : "🗄 Archive this deal"}
+            </button>
+          )}
+          {f.status === "won" && permissions.seeAmounts && (
+            <>
+              <PaymentLog payments={f.payments} dealValue={effectiveDealValue(f)} partners={partners} />
+              <div className="row2">
+                <Field label="Log a payment (KES)">
+                  <input
+                    type="number"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="e.g. 400000"
+                  />
+                </Field>
+                <Field label="Note (optional)">
+                  <input
+                    value={paymentNote}
+                    onChange={(e) => setPaymentNote(e.target.value)}
+                    placeholder="e.g. Interim invoice"
+                  />
+                </Field>
+              </div>
+              <button
+                type="button"
+                className="chip-btn"
+                disabled={!paymentAmount || Number(paymentAmount) <= 0}
+                onClick={() => {
+                  const entry = { id: uid(), amount: Number(paymentAmount), date: todayISO(), note: paymentNote.trim(), partnerId: me };
+                  setF({ ...f, payments: [...(f.payments || []), entry] });
+                  setPaymentAmount("");
+                  setPaymentNote("");
+                }}
+              >
+                + Log payment
+              </button>
+            </>
+          )}
           <HistoryLog history={f.statusHistory} partners={partners} stageLabel={stageLabel} />
           {prospect && <ActivityTimeline prospect={prospect} activity={activity} partners={partners} />}
           <NoteLog notes={f.notesHistory} partners={partners} />
@@ -2061,6 +2385,14 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
   const [voiceFillOpen, setVoiceFillOpen] = useState(false);
   const voiceSupported = hasVoiceSupport();
   const [showContact, setShowContact] = useState(Boolean(f.phone || f.email));
+  // Editing an existing record starts with the rarely-changing identity fields (name, type,
+  // responsible partner, practice fed, contact details) collapsed into a compact summary — those
+  // get set once and revisited rarely, unlike Last contact/Next action/Notes below, which is what
+  // actually gets touched on every check-in. A brand-new record has nothing to summarize yet, so
+  // it starts fully expanded.
+  const [editingDetails, setEditingDetails] = useState(!item);
+  const owner = partners.find((p) => p.id === f.responsiblePartner);
+  const practiceFedTags = Array.isArray(f.practiceFed) ? f.practiceFed : (f.practiceFed ? [f.practiceFed] : []);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
@@ -2069,71 +2401,88 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
-          {voiceSupported && (
-            voiceFillOpen ? (
-              <VoiceFillPanel fields={REFERRAL_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
-            ) : (
-              <button type="button" className="voice-fill-trigger" onClick={() => setVoiceFillOpen(true)}>
-                🎤 Fill by voice
-              </button>
-            )
-          )}
-          <Field label="Name">
-            <input value={f.name} onChange={set("name")} placeholder="Amina" />
-          </Field>
-          <Field label="Affiliated organization / institution">
-            <input value={f.institution} onChange={set("institution")} placeholder="KMP & Associates" />
-          </Field>
-          <div className="row2">
-            <Field label="Type">
-              <select value={f.type} onChange={set("type")}>
-                <option value="">— Select —</option>
-                {optionsWithLegacy(referralTypes, f.type).map((x) => <option key={x}>{x}</option>)}
-              </select>
-            </Field>
-            <Field label="Responsible partner">
-              <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
-                {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="Practice fed">
-            <div className="tag-picker">
-              {tagOptionsWithLegacy(practices, f.practiceFed).map((p) => {
-                const active = (f.practiceFed || []).includes(p);
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    className={`tag-chip ${active ? "tag-chip-active" : ""}`}
-                    onClick={() => {
-                      const current = f.practiceFed || [];
-                      const next = active ? current.filter((x) => x !== p) : [...current, p];
-                      setF({ ...f, practiceFed: next });
-                    }}
-                  >
-                    {p}
+          {!editingDetails ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org">{referralDisplayName(f)}</span>
+                <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
+              </div>
+              <div className="card-meta">
+                {f.type && <Pill>{f.type}</Pill>}
+                {practiceFedTags.map((tag) => <Pill key={tag} tone="owner">{tag}</Pill>)}
+                {owner && <Pill tone="owner">{owner.name}</Pill>}
+              </div>
+              <ContactLinkRow phone={f.phone} email={f.email} />
+            </div>
+          ) : (
+            <>
+              {voiceSupported && (
+                voiceFillOpen ? (
+                  <VoiceFillPanel fields={REFERRAL_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
+                ) : (
+                  <button type="button" className="voice-fill-trigger" onClick={() => setVoiceFillOpen(true)}>
+                    🎤 Fill by voice
                   </button>
-                );
-              })}
-            </div>
-          </Field>
-          <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
-            {showContact
-              ? "− Hide contact details"
-              : (f.phone || f.email) ? "👁 View contact details" : "+ Add contact details (optional)"}
-          </button>
-          {showContact && (
-            <div className="row2">
-              <Field label="Phone">
-                <input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254 7XX XXX XXX" />
+                )
+              )}
+              <Field label="Name">
+                <input value={f.name} onChange={set("name")} placeholder="Amina" />
               </Field>
-              <Field label="Email">
-                <input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" />
+              <Field label="Affiliated organization / institution">
+                <input value={f.institution} onChange={set("institution")} placeholder="KMP & Associates" />
               </Field>
-            </div>
+              <div className="row2">
+                <Field label="Type">
+                  <select value={f.type} onChange={set("type")}>
+                    <option value="">— Select —</option>
+                    {optionsWithLegacy(referralTypes, f.type).map((x) => <option key={x}>{x}</option>)}
+                  </select>
+                </Field>
+                <Field label="Responsible partner">
+                  <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
+                    {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Practice fed">
+                <div className="tag-picker">
+                  {tagOptionsWithLegacy(practices, f.practiceFed).map((p) => {
+                    const active = (f.practiceFed || []).includes(p);
+                    return (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`tag-chip ${active ? "tag-chip-active" : ""}`}
+                        onClick={() => {
+                          const current = f.practiceFed || [];
+                          const next = active ? current.filter((x) => x !== p) : [...current, p];
+                          setF({ ...f, practiceFed: next });
+                        }}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Field>
+              <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
+                {showContact
+                  ? "− Hide contact details"
+                  : (f.phone || f.email) ? "👁 View contact details" : "+ Add contact details (optional)"}
+              </button>
+              {showContact && (
+                <div className="row2">
+                  <Field label="Phone">
+                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254 7XX XXX XXX" />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" />
+                  </Field>
+                </div>
+              )}
+              {showContact && <ContactLinkRow phone={f.phone} email={f.email} />}
+            </>
           )}
-          {showContact && <ContactLinkRow phone={f.phone} email={f.email} />}
           <div className="row2">
             <Field label="Last contact">
               <input type="date" value={f.lastContact} onChange={set("lastContact")} />
@@ -2197,7 +2546,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
   );
 }
 
-function ClientModal({ item, partners, sectors, occupations, prospects, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ClientModal({ item, partners, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     item
       ? {
@@ -2240,6 +2589,12 @@ function ClientModal({ item, partners, sectors, occupations, prospects, nextActi
   const [showContact, setShowContact] = useState(Boolean(f.contactPhone || f.contactEmail));
   const cv = item ? clientValue(item.name, prospects) : null;
   const canSeeClientValue = permissions.seeAmounts || permissions.seeMetrics;
+  // Existing clients collapse the rarely-changing identity fields (type, name, contact, position,
+  // sector, responsible partner, what they instructed us on / probably need, contact details) into
+  // a compact summary — Last contact/Next action/Notes stay live below, since that's what actually
+  // gets touched on a check-in. New clients have nothing to summarize yet, so start expanded.
+  const [editingDetails, setEditingDetails] = useState(!item);
+  const owner = partners.find((p) => p.id === f.responsiblePartner);
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -2286,74 +2641,93 @@ function ClientModal({ item, partners, sectors, occupations, prospects, nextActi
               </button>
             )
           )}
-          <Field label="Client type">
-            <select value={f.clientType} onChange={set("clientType")}>
-              {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
-            </select>
-          </Field>
-          <Field label={f.clientType === "Individual" ? "Client name" : "Client / organization name"}>
-            <input
-              value={f.name}
-              onChange={set("name")}
-              placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Holdings Ltd"}
-            />
-          </Field>
-          {f.clientType !== "Individual" && (
-            <div className="row2">
-              <Field label="Contact">
-                <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
-              </Field>
-              <Field label="Position">
-                <input value={f.position} onChange={set("position")} placeholder="CFO" />
-              </Field>
+          {!editingDetails ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org">{f.name || "Unnamed client"}</span>
+                <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
+              </div>
+              <div className="card-meta">
+                {f.sector && <Pill>{f.sector}</Pill>}
+                {f.clientType !== "Individual" && f.position && <Pill tone="owner">{f.position}</Pill>}
+                {owner && <Pill tone="owner">{owner.name}</Pill>}
+              </div>
+              {f.instructedOn && <p className="reminder-action">Instructed on: {f.instructedOn}</p>}
+              {f.potentialNeeds && <p className="reminder-action muted-line">Possible need: {f.potentialNeeds}</p>}
+              <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />
             </div>
-          )}
-          <div className="row2">
-            {f.clientType === "Individual" ? (
-              <Field label="Occupation / role (optional)">
-                <SuggestInput
-                  value={f.sector}
-                  onChange={set("sector")}
-                  suggestions={occupations}
-                  placeholder="e.g. Business owner, retired banker"
-                />
-              </Field>
-            ) : (
-              <Field label="Sector">
-                <select value={f.sector} onChange={set("sector")}>
-                  <option value="">— Select —</option>
-                  {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
+          ) : (
+            <>
+              <Field label="Client type">
+                <select value={f.clientType} onChange={set("clientType")}>
+                  {CLIENT_TYPES.map((x) => <option key={x}>{x}</option>)}
                 </select>
               </Field>
-            )}
-            <Field label="Responsible partner">
-              <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
-                {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </Field>
-          </div>
-          <Field label="What they instructed us on">
-            <input value={f.instructedOn} onChange={set("instructedOn")} placeholder="Property acquisition" />
-          </Field>
-          <Field label="What else they probably need">
-            <input value={f.potentialNeeds} onChange={set("potentialNeeds")} placeholder="Succession planning, tax structuring" />
-          </Field>
-          <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
-            {showContact
-              ? "− Hide contact details"
-              : (f.contactPhone || f.contactEmail) ? "👁 View contact details" : "+ Add contact details (optional)"}
-          </button>
-          {showContact && (
-            <div className="row2">
-              <Field label="Phone">
-                <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+              <Field label={f.clientType === "Individual" ? "Client name" : "Client / organization name"}>
+                <input
+                  value={f.name}
+                  onChange={set("name")}
+                  placeholder={f.clientType === "Individual" ? "e.g. Jane Wanjiru" : "ABC Holdings Ltd"}
+                />
               </Field>
-              <Field label="Email">
-                <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
+              {f.clientType !== "Individual" && (
+                <div className="row2">
+                  <Field label="Contact">
+                    <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                  </Field>
+                  <Field label="Position">
+                    <SuggestInput value={f.position} onChange={set("position")} suggestions={positions} placeholder="CFO" />
+                  </Field>
+                </div>
+              )}
+              <div className="row2">
+                {f.clientType === "Individual" ? (
+                  <Field label="Occupation / role (optional)">
+                    <SuggestInput
+                      value={f.sector}
+                      onChange={set("sector")}
+                      suggestions={occupations}
+                      placeholder="e.g. Business owner, retired banker"
+                    />
+                  </Field>
+                ) : (
+                  <Field label="Sector">
+                    <select value={f.sector} onChange={set("sector")}>
+                      <option value="">— Select —</option>
+                      {optionsWithLegacy(sectors, f.sector).map((x) => <option key={x}>{x}</option>)}
+                    </select>
+                  </Field>
+                )}
+                <Field label="Responsible partner">
+                  <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
+                    {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                </Field>
+              </div>
+              <Field label="What they instructed us on">
+                <input value={f.instructedOn} onChange={set("instructedOn")} placeholder="Property acquisition" autoComplete="off" />
               </Field>
-            </div>
+              <Field label="What else they probably need">
+                <input value={f.potentialNeeds} onChange={set("potentialNeeds")} placeholder="Succession planning, tax structuring" autoComplete="off" />
+              </Field>
+              <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
+                {showContact
+                  ? "− Hide contact details"
+                  : (f.contactPhone || f.contactEmail) ? "👁 View contact details" : "+ Add contact details (optional)"}
+              </button>
+              {showContact && (
+                <div className="row2">
+                  <Field label="Phone">
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
+                  </Field>
+                </div>
+              )}
+              {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
+            </>
           )}
-          {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
           <Field label="Last contact">
             <input type="date" value={f.lastContact} onChange={set("lastContact")} />
           </Field>
@@ -2455,6 +2829,12 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
   };
   const [voiceFillOpen, setVoiceFillOpen] = useState(false);
   const voiceSupported = hasVoiceSupport();
+  // Existing tenders collapse the rarely-changing identity fields (title, procuring entity,
+  // deadline, estimated value, responsible partner) into a compact summary — Stage/Next
+  // action/scorecard/Result stay live below, since those are what actually move as a tender
+  // progresses. New tenders have nothing to summarize yet, so start expanded.
+  const [editingDetails, setEditingDetails] = useState(!tender);
+  const owner = partners.find((p) => p.id === f.responsiblePartner);
   useEffect(() => {
     if (tender) markSeen?.(tender.id, tenderActivityCount(tender));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2477,34 +2857,51 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
               </button>
             )
           )}
-          <Field label="Tender title">
-            <input value={f.title} onChange={set("title")} placeholder="Nairobi City County — legal services panel" />
-          </Field>
-          <div className="row2">
-            <Field label="Procuring entity">
-              <input value={f.procuringEntity} onChange={set("procuringEntity")} placeholder="Nairobi City County" />
-            </Field>
-            <Field label="Submission deadline">
-              <input type="date" value={f.deadline} onChange={set("deadline")} />
-            </Field>
-          </div>
-          {permissions.seeAmounts ? (
-            <div className="row2">
-              <Field label="Estimated value (KES)">
-                <input type="number" value={f.estimatedValue} onChange={set("estimatedValue")} placeholder="1200000" />
-              </Field>
-              <Field label="Responsible partner">
-                <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
-                  {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-                </select>
-              </Field>
+          {!editingDetails ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org">{f.title || "Unnamed tender"}</span>
+                <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
+              </div>
+              <div className="card-meta">
+                {f.procuringEntity && <Pill>{f.procuringEntity}</Pill>}
+                {owner && <Pill tone="owner">{owner.name}</Pill>}
+                {permissions.seeAmounts && <Pill tone="owner">{fmtKES(f.estimatedValue)}</Pill>}
+              </div>
+              {f.deadline && <p className="reminder-action">Submission deadline: {f.deadline}</p>}
             </div>
           ) : (
-            <Field label="Responsible partner">
-              <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
-                {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </Field>
+            <>
+              <Field label="Tender title">
+                <input value={f.title} onChange={set("title")} placeholder="Nairobi City County — legal services panel" />
+              </Field>
+              <div className="row2">
+                <Field label="Procuring entity">
+                  <input value={f.procuringEntity} onChange={set("procuringEntity")} placeholder="Nairobi City County" />
+                </Field>
+                <Field label="Submission deadline">
+                  <input type="date" value={f.deadline} onChange={set("deadline")} />
+                </Field>
+              </div>
+              {permissions.seeAmounts ? (
+                <div className="row2">
+                  <Field label="Estimated value (KES)">
+                    <input type="number" value={f.estimatedValue} onChange={set("estimatedValue")} placeholder="1200000" />
+                  </Field>
+                  <Field label="Responsible partner">
+                    <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
+                      {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              ) : (
+                <Field label="Responsible partner">
+                  <select value={f.responsiblePartner} onChange={set("responsiblePartner")}>
+                    {partners.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+                  </select>
+                </Field>
+              )}
+            </>
           )}
           <Field label="Pipeline stage">
             <select value={f.stage} onChange={set("stage")}>
@@ -2654,7 +3051,7 @@ function ReferralImpactPanel({ kind, record, store, onOpenProspect, onClose }) {
           ) : (
             <div className="card-list">
               {impact.prospects.map((p) => (
-                <ProspectCard key={p.id} p={p} partners={store.partners} seenMap={store.seenProspects} onOpen={onOpenProspect} />
+                <ProspectCard key={p.id} p={p} partners={store.partners} clients={store.clients} seenMap={store.seenProspects} onOpen={onOpenProspect} />
               ))}
             </div>
           )}
@@ -2669,6 +3066,7 @@ function ReferralImpactPanel({ kind, record, store, onOpenProspect, onClose }) {
 // live alongside it as their own pages off the same menu.
 function CostOfBDPage({ store }) {
   const [costs, setCosts] = useState({ ...store.activityCosts });
+  const [justSaved, setJustSaved] = useState(false);
   const dirty = ACTIVITY_TYPES.some((t) => Number(costs[t.key] || 0) !== Number(store.activityCosts[t.key] || 0));
 
   return (
@@ -2698,10 +3096,12 @@ function CostOfBDPage({ store }) {
         onClick={() => {
           const cleaned = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, Number(costs[t.key]) || 0]));
           store.saveActivityCosts(cleaned);
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 2000);
         }}
         style={{ marginTop: 14 }}
       >
-        Save cost table
+        {justSaved ? "✓ Saved" : "Save cost table"}
       </button>
     </>
   );
@@ -2711,6 +3111,7 @@ function CostOfBDPage({ store }) {
 // Cost of BD; a different number per activity type, not a cost.
 function BDTargetsPage({ store }) {
   const [targets, setTargets] = useState({ ...store.activityTargets });
+  const [justSaved, setJustSaved] = useState(false);
   const dirty = ACTIVITY_TYPES.some((t) => Number(targets[t.key] || 0) !== Number(store.activityTargets[t.key] || 0));
 
   return (
@@ -2739,10 +3140,12 @@ function BDTargetsPage({ store }) {
         onClick={() => {
           const cleaned = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, Math.max(0, Number(targets[t.key]) || 0)]));
           store.saveActivityTargets(cleaned);
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 2000);
         }}
         style={{ marginTop: 14 }}
       >
-        Save monthly targets
+        {justSaved ? "✓ Saved" : "Save monthly targets"}
       </button>
     </>
   );
@@ -2757,6 +3160,7 @@ function EditableListPage({ initial, note, addPlaceholder, addLabel, saveLabel, 
   const [newItem, setNewItem] = useState("");
   const [renamingIndex, setRenamingIndex] = useState(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
   const dirty = JSON.stringify(items) !== JSON.stringify(initial);
 
   const add = () => {
@@ -2822,10 +3226,14 @@ function EditableListPage({ initial, note, addPlaceholder, addLabel, saveLabel, 
       <button
         className="btn btn-primary"
         disabled={!dirty || items.length === 0}
-        onClick={() => onSave(items)}
+        onClick={() => {
+          onSave(items);
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 2000);
+        }}
         style={{ marginTop: 14 }}
       >
-        {saveLabel}
+        {justSaved ? "✓ Saved" : saveLabel}
       </button>
     </>
   );
@@ -3026,12 +3434,29 @@ export default function App() {
     setVvh();
     vv.addEventListener("resize", setVvh);
     vv.addEventListener("scroll", setVvh);
+    // iOS's AutoFill quick-bar (the key/card/location icon row above the keyboard) can still be
+    // animating in after the keyboard's own resize event fires, so a single immediate measurement
+    // can lock in a too-tall height and visibly squash the sheet's content. Re-checking shortly
+    // after any focus change catches the settled, final height once everything's done animating.
+    const recheckSoon = () => { setVvh(); setTimeout(setVvh, 350); };
+    window.addEventListener("focusin", recheckSoon);
+    window.addEventListener("focusout", recheckSoon);
     return () => {
       vv.removeEventListener("resize", setVvh);
       vv.removeEventListener("scroll", setVvh);
+      window.removeEventListener("focusin", recheckSoon);
+      window.removeEventListener("focusout", recheckSoon);
     };
   }, []);
   const [tab, setTab] = useState("pipeline");
+  // `me` is who the app THINKS is using it — set purely by tapping a name on the "who's picking
+  // this up" screen below, with no password, no session, no verification of any kind. Anyone with
+  // this app's URL can select any partner and act, write, and save data as them. This is fine for
+  // a single trusted team on an internal tool; it is not authentication and must not be treated as
+  // one. To wire in real auth later: replace how `me` gets set (from a verified login session
+  // instead of a tap), and leave everything downstream — getPermissions(myPartner), every
+  // permissions.xyz check — exactly as-is. That separation between "who you are" and "what you can
+  // do" already exists and is the intended seam for this to plug into.
   const [me, setMe] = useState(null);
   const [filterPartner, setFilterPartner] = useState("all");
   const [filterTendersPartner, setFilterTendersPartner] = useState("all");
@@ -3051,11 +3476,16 @@ export default function App() {
   const [tenderPrefill, setTenderPrefill] = useState("");
   const [collapsed, setCollapsed] = useState({});
   const [tenderCollapsed, setTenderCollapsed] = useState({});
+  const [showArchived, setShowArchived] = useState({});
   const [notifOpen, setNotifOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
   const occupationSuggestions = useMemo(
     () => individualOccupations(store.clients, store.prospects),
+    [store.clients, store.prospects]
+  );
+  const positionSuggestionsList = useMemo(
+    () => positionSuggestions(store.clients, store.prospects),
     [store.clients, store.prospects]
   );
   const orgSuggestions = useMemo(
@@ -3145,10 +3575,15 @@ export default function App() {
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
 
-  const grouped = STAGES.filter((s, i, arr) => arr.findIndex((y) => y.key === s.key) === i).map((s) => ({
-    ...s,
-    items: visibleProspects.filter((p) => p.status === s.key),
-  }));
+  const grouped = STAGES.filter((s, i, arr) => arr.findIndex((y) => y.key === s.key) === i).map((s) => {
+    const items = visibleProspects.filter((p) => p.status === s.key);
+    return {
+      ...s,
+      items,
+      activeItems: items.filter((p) => !p.archived),
+      archivedItems: items.filter((p) => p.archived),
+    };
+  });
 
   const overdueCount = collectReminders(store).filter((item) => daysBetween(item.date, todayISO()) > 0).length;
   const feed = computeUnseenFeed(store);
@@ -3264,15 +3699,49 @@ export default function App() {
                 <span>{s.n}. {s.label}</span>
                 {myPermissions.seeMetrics && (
                   <span className="stage-count">
-                    {s.items.length} · {fmtKES(s.items.reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0))}
+                    {s.items.length} · {fmtKES(s.items.reduce((a, p) => a + effectiveDealValue(p), 0))}
                   </span>
                 )}
               </button>
               {!collapsed[s.key] && (
                 <div className="card-list">
-                  {s.items.length === 0 && <p className="empty">Nothing here yet.</p>}
-                  {s.items.map((p) => (
-                    <ProspectCard key={p.id} p={p} partners={store.partners} seenMap={store.seenProspects} onOpen={setOpenProspect} permissions={myPermissions} />
+                  {s.activeItems.length === 0 && s.archivedItems.length === 0 && <p className="empty">Nothing here yet.</p>}
+                  {s.activeItems.length === 0 && s.archivedItems.length > 0 && !showArchived[s.key] && (
+                    <p className="empty">Everything here is archived.</p>
+                  )}
+                  {s.activeItems.map((p) => (
+                    <ProspectCard
+                      key={p.id}
+                      p={p}
+                      partners={store.partners}
+                      clients={store.clients}
+                      seenMap={store.seenProspects}
+                      onOpen={setOpenProspect}
+                      permissions={myPermissions}
+                      onArchiveToggle={(prospect) => store.saveProspect({ ...prospect, archived: !prospect.archived })}
+                    />
+                  ))}
+                  {s.archivedItems.length > 0 && (
+                    <button
+                      type="button"
+                      className="chip-btn chip-ghost"
+                      style={{ alignSelf: "flex-start" }}
+                      onClick={() => setShowArchived({ ...showArchived, [s.key]: !showArchived[s.key] })}
+                    >
+                      {showArchived[s.key] ? "− Hide" : "🗄 Show"} {s.archivedItems.length} archived
+                    </button>
+                  )}
+                  {showArchived[s.key] && s.archivedItems.map((p) => (
+                    <ProspectCard
+                      key={p.id}
+                      p={p}
+                      partners={store.partners}
+                      clients={store.clients}
+                      seenMap={store.seenProspects}
+                      onOpen={setOpenProspect}
+                      permissions={myPermissions}
+                      onArchiveToggle={(prospect) => store.saveProspect({ ...prospect, archived: !prospect.archived })}
+                    />
                   ))}
                 </div>
               )}
@@ -3517,6 +3986,7 @@ export default function App() {
           sectors={store.sectors}
           occupations={occupationSuggestions}
           organizations={orgSuggestions}
+          positions={positionSuggestionsList}
           nextActionSuggestions={prospectNextActionSuggestions}
           permissions={myPermissions}
           me={me}
@@ -3536,6 +4006,7 @@ export default function App() {
           sectors={store.sectors}
           occupations={occupationSuggestions}
           prospects={store.prospects}
+          positions={positionSuggestionsList}
           nextActionSuggestions={clientNextActionSuggestions}
           permissions={myPermissions}
           me={me}
@@ -3939,6 +4410,7 @@ function SampleDataControls({ store }) {
 
 function LogActivityModal({ activityType, store, me, onClose }) {
   const [query, setQuery] = useState("");
+  const [suggestOpen, setSuggestOpen] = useState(true);
   const [firmName, setFirmName] = useState("");
   const [firmIndustry, setFirmIndustry] = useState("");
   const [cost, setCost] = useState(String(store.activityCosts[activityType.key] ?? 0));
@@ -4003,14 +4475,18 @@ function LogActivityModal({ activityType, store, me, onClose }) {
                 <input
                   autoFocus
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => { setQuery(e.target.value); setSuggestOpen(true); }}
                   placeholder={source ? "Start typing..." : "e.g. topic, event name..."}
                 />
               </Field>
-              {source && filtered.length > 0 && (
+              {source && suggestOpen && filtered.length > 0 && (
                 <div className="suggest-list">
                   {filtered.map((o) => (
-                    <button key={`${o.tag}-${o.id}`} className="suggest-row" onClick={() => submit(o.label)}>
+                    <button
+                      key={`${o.tag}-${o.id}`}
+                      className="suggest-row"
+                      onClick={() => { setQuery(o.label); setSuggestOpen(false); }}
+                    >
                       <span>{o.label}</span>
                       <Pill tone="owner">{o.tag}</Pill>
                     </button>
@@ -4069,7 +4545,19 @@ function Insights({ store }) {
   const livePipelineValue = prospects
     .filter((p) => !["won", "lost"].includes(p.status))
     .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
-  const wonInScopeValue = prospects.filter(isWonInScope).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+  const wonInScopeValue = prospects.filter(isWonInScope).reduce((a, p) => a + effectiveDealValue(p), 0);
+  // Collected is scoped by WHEN the payment landed, not when the deal was won — a payment logged
+  // this month counts here even if the deal itself was won three months ago. That lag is the whole
+  // point of tracking this separately from wonInScopeValue.
+  const collectedInScopeValue = prospects.reduce((sum, p) => {
+    const paymentsInScope = (p.payments || []).filter((pmt) => isAllTime || monthKey(pmt.date) === viewMonth);
+    return sum + paymentsInScope.reduce((a, pmt) => a + (Number(pmt.amount) || 0), 0);
+  }, 0);
+  // Outstanding is always a right-now snapshot across every won deal, never scoped by month — it
+  // doesn't make sense to ask "what was outstanding in March," only "what's outstanding now."
+  const totalOutstanding = prospects
+    .filter((p) => p.status === "won")
+    .reduce((sum, p) => sum + Math.max(0, effectiveDealValue(p) - paymentsReceived(p)), 0);
 
   const reachedProposal = prospects.filter((p) => reachedInScope(p, "proposal_submitted")).length;
   const wonCount = prospects.filter(isWonInScope).length;
@@ -4096,9 +4584,13 @@ function Insights({ store }) {
       const hist = p.statusHistory || [];
       const wonThisMonth = hist.some((h) => h.kind === "stage" && h.stage === "won" && monthKey(h.date) === k);
       const legacyFallback = hist.length === 0 && p.status === "won" && k === monthKey();
-      return wonThisMonth || legacyFallback ? sum + (Number(p.estimatedFee) || 0) : sum;
+      return wonThisMonth || legacyFallback ? sum + effectiveDealValue(p) : sum;
     }, 0);
-    return { name: monthLabel(k).split(" ")[0], value };
+    const collected = prospects.reduce((sum, p) => {
+      const paymentsThisMonth = (p.payments || []).filter((pmt) => monthKey(pmt.date) === k);
+      return sum + paymentsThisMonth.reduce((a, pmt) => a + (Number(pmt.amount) || 0), 0);
+    }, 0);
+    return { name: monthLabel(k).split(" ")[0], value, collected };
   });
   const avgMonthlyWon = wonByMonth.length ? wonByMonth.reduce((a, m) => a + m.value, 0) / wonByMonth.length : 0;
   const pipelineCoverageMonths = avgMonthlyWon > 0 ? livePipelineValue / avgMonthlyWon : null;
@@ -4147,14 +4639,14 @@ function Insights({ store }) {
 
   // --- Won vs live pipeline by practice area ---
   const byPractice = store.practices.map((pa) => {
-    const won = prospects.filter((p) => p.practiceArea === pa && isWonInScope(p)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+    const won = prospects.filter((p) => p.practiceArea === pa && isWonInScope(p)).reduce((a, p) => a + effectiveDealValue(p), 0);
     const pipeline = prospects.filter((p) => p.practiceArea === pa && !["won", "lost"].includes(p.status)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
     return { name: pa.replace(" & ", " &\n"), Won: won, Pipeline: pipeline };
   }).filter((r) => r.Won > 0 || r.Pipeline > 0);
 
   // --- Won vs live pipeline by client type — individuals vs institutional/corporate business ---
   const byClientType = CLIENT_TYPES.map((ct) => {
-    const won = prospects.filter((p) => (p.clientType || CLIENT_TYPES[0]) === ct && isWonInScope(p)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+    const won = prospects.filter((p) => (p.clientType || CLIENT_TYPES[0]) === ct && isWonInScope(p)).reduce((a, p) => a + effectiveDealValue(p), 0);
     const pipeline = prospects.filter((p) => (p.clientType || CLIENT_TYPES[0]) === ct && !["won", "lost"].includes(p.status)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
     return { name: ct, Won: won, Pipeline: pipeline };
   }).filter((r) => r.Won > 0 || r.Pipeline > 0);
@@ -4219,7 +4711,7 @@ function Insights({ store }) {
   const wonAttributionMap = {};
   prospects.filter(isWonInScope).forEach((p) => {
     const key = resolveWonAttribution(p);
-    wonAttributionMap[key] = (wonAttributionMap[key] || 0) + (Number(p.estimatedFee) || 0);
+    wonAttributionMap[key] = (wonAttributionMap[key] || 0) + effectiveDealValue(p);
   });
   const topSourcesByValue = Object.entries(wonAttributionMap)
     .map(([name, wonValue]) => ({ name, wonValue }))
@@ -4261,7 +4753,7 @@ function Insights({ store }) {
       id: partner.id,
       name: partner.name,
       pipeline: mine.filter((p) => !["won", "lost"].includes(p.status)).reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0),
-      won: mine.filter((p) => p.status === "won").reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0),
+      won: mine.filter((p) => p.status === "won").reduce((a, p) => a + effectiveDealValue(p), 0),
       count: mine.length,
       winRate: mineReachedProposal > 0 ? Math.round((mineWonCount / mineReachedProposal) * 100) : null,
       activity: thisMonthActivityAll.filter((a) => a.partnerId === partner.id).length,
@@ -4274,7 +4766,7 @@ function Insights({ store }) {
     const bySource = {};
     mineWon.forEach((p) => {
       const key = p.source || "Unspecified";
-      bySource[key] = (bySource[key] || 0) + (Number(p.estimatedFee) || 0);
+      bySource[key] = (bySource[key] || 0) + effectiveDealValue(p);
     });
     const ranked = Object.entries(bySource).map(([source, value]) => ({ source, value })).sort((a, b) => b.value - a.value);
     const total = ranked.reduce((a, s) => a + s.value, 0);
@@ -4428,6 +4920,14 @@ function Insights({ store }) {
               <span className="stat-label">{isAllTime ? "Won, all time" : `Won in ${monthLabel(viewMonth)}`}</span>
             </div>
             <div className="stat">
+              <span className="stat-value">{fmtKESExact(collectedInScopeValue)}</span>
+              <span className="stat-label">{isAllTime ? "Collected, all time" : `Collected in ${monthLabel(viewMonth)}`}</span>
+            </div>
+            <div className="stat">
+              <span className="stat-value">{fmtKESExact(totalOutstanding)}</span>
+              <span className="stat-label">Outstanding right now, across all won deals</span>
+            </div>
+            <div className="stat">
               <span className="stat-value">{winRate != null ? `${winRate}%` : "—"}</span>
               <span className="stat-label">Win rate (of proposals sent)</span>
             </div>
@@ -4470,18 +4970,24 @@ function Insights({ store }) {
           </section>
 
           <section className="insight-card">
-            <h4>Won value by month</h4>
-            <p className="insight-note">Last 6 months, from when each prospect actually reached Won.</p>
+            <h4>Won vs. Collected by month</h4>
+            <p className="insight-note">
+              Won reflects when each deal actually reached Won. Collected reflects when a payment was logged against it — which can land months after the deal itself was won, regardless of which month that was.
+            </p>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={wonByMonth} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E4DFD3" />
                 <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#6B7684" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: "#6B7684" }} axisLine={false} tickLine={false} width={44} tickFormatter={(v) => (v >= 1000000 ? `${(v / 1000000).toFixed(1)}M` : v >= 1000 ? `${Math.round(v / 1000)}K` : v)} />
                 <Tooltip formatter={chartTooltip} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                <Bar dataKey="value" fill={CHART_GOLD} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="value" name="Won" fill={CHART_GOLD} radius={[4, 4, 0, 0]} />
+                <Bar dataKey="collected" name="Collected" fill={CHART_NAVY} radius={[4, 4, 0, 0]} />
               </BarChart>
-
             </ResponsiveContainer>
+            <div className="legend-row">
+              <span><span className="legend-dot" style={{ background: CHART_GOLD }} /> Won</span>
+              <span><span className="legend-dot" style={{ background: CHART_NAVY }} /> Collected</span>
+            </div>
           </section>
 
           <section className="insight-card">
@@ -4702,7 +5208,22 @@ function Scorecard({ store, me, myPartner, canViewByPartner = true, canSeeMetric
     .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
   const wonValue = monthProspects
     .filter((p) => reachedStageInMonth(p, "won", mk))
-    .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
+    .reduce((a, p) => a + effectiveDealValue(p), 0);
+  const totalSpent = monthActivity.reduce((a, x) => a + (Number(x.cost) || 0), 0);
+
+  // Previous month's equivalents, same scope filter, purely for the "vs last month" trend labels.
+  const prevMk = shiftMonthKey(mk, -1);
+  const prevMonthActivity = store.activity.filter((a) => monthKey(a.date) === prevMk && (scope === "firm" || a.partnerId === selectedPartner));
+  const prevQualified = monthProspects.filter((p) => reachedStageInMonth(p, "qualified", prevMk)).length;
+  const prevFormalProposals = monthProspects.filter((p) => reachedStageInMonth(p, "proposal_submitted", prevMk)).length;
+  const prevWonValue = monthProspects
+    .filter((p) => reachedStageInMonth(p, "won", prevMk))
+    .reduce((a, p) => a + effectiveDealValue(p), 0);
+  const prevTotalSpent = prevMonthActivity.reduce((a, x) => a + (Number(x.cost) || 0), 0);
+  const wonTrend = monthTrend(wonValue, prevWonValue);
+  const qualifiedTrend = monthTrend(qualifiedThisMonth, prevQualified);
+  const proposalsTrend = monthTrend(formalProposals, prevFormalProposals);
+  const spentTrend = monthTrend(totalSpent, prevTotalSpent);
 
   const nameSet = (arr, key) => new Set(arr.map((x) => (x[key] || "").trim().toLowerCase()));
   const prospectNames = nameSet(store.prospects, "organization");
@@ -4773,18 +5294,28 @@ function Scorecard({ store, me, myPartner, canViewByPartner = true, canSeeMetric
             <div className="stat">
               <span className="stat-value">{fmtKES(wonValue)}</span>
               <span className="stat-label">Won in {monthLabel(viewMonth)}</span>
+              {wonTrend && <span className={`stat-trend stat-trend-${wonTrend.tone}`}>{wonTrend.text}</span>}
             </div>
           )}
           {canSeeMetrics && (
             <div className="stat">
               <span className="stat-value">{qualifiedThisMonth}</span>
               <span className="stat-label">New qualified opportunities</span>
+              {qualifiedTrend && <span className={`stat-trend stat-trend-${qualifiedTrend.tone}`}>{qualifiedTrend.text}</span>}
             </div>
           )}
           {canSeeMetrics && (
             <div className="stat">
               <span className="stat-value">{formalProposals}</span>
               <span className="stat-label">Formal proposals / quotes</span>
+              {proposalsTrend && <span className={`stat-trend stat-trend-${proposalsTrend.tone}`}>{proposalsTrend.text}</span>}
+            </div>
+          )}
+          {canSeeAmounts && (
+            <div className="stat">
+              <span className="stat-value">{fmtKESExact(totalSpent)}</span>
+              <span className="stat-label">Spent on BD in {monthLabel(viewMonth)}</span>
+              {spentTrend && <span className={`stat-trend stat-trend-${spentTrend.tone}`}>{spentTrend.text}</span>}
             </div>
           )}
         </section>
@@ -4978,6 +5509,7 @@ export function Style() {
       .pill.score-low{ background:#F7E3E3; color:var(--red); }
       .update-badge{ font-size:11px; font-weight:700; background:var(--navy); color:var(--gold-2); padding:3px 8px; border-radius:999px; display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
       .referral-badge{ font-size:11px; font-weight:700; background:#E9F3EA; color:#2F6B33; border:1px solid #CBE3CD; padding:3px 8px; border-radius:999px; display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
+      .archive-badge{ font-size:11px; font-weight:700; background:var(--cream); color:var(--muted); border:1px solid var(--line); padding:3px 8px; border-radius:999px; display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
       .update-badge-btn{ background:none; border:none; padding:0; cursor:pointer; display:inline-flex; }
       .flags{ display:flex; gap:6px; }
       .flag{ font-size:11px; font-weight:600; padding:3px 8px; border-radius:999px; }
@@ -5041,8 +5573,8 @@ export function Style() {
       .watchlist-checkback-field{ display:flex; flex-direction:column; gap:4px; font-size:11.5px; color:var(--muted); font-weight:600; }
       .watchlist-checkback{ font-size:11px; color:var(--navy-2); background:#EAF0F6; padding:3px 8px; border-radius:999px; align-self:flex-start; }
       .watchlist-checkback-due{ color:var(--amber); background:#FBF1DC; }
-      .contact-link-row{ display:flex; gap:8px; margin-top:-4px; }
-      .contact-link{ flex:1; text-align:center; font-size:12.5px; font-weight:700; color:var(--navy); background:#E7EEF5; border-radius:8px; padding:9px; text-decoration:none; }
+      .contact-link-row{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:-4px; }
+      .contact-link{ text-align:center; font-size:12.5px; font-weight:700; color:var(--navy); background:#E7EEF5; border-radius:8px; padding:9px; text-decoration:none; }
       .cost-table{ display:flex; flex-direction:column; gap:2px; }
       .cost-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
       .cost-row-actions{ display:flex; align-items:center; gap:4px; }
@@ -5052,7 +5584,7 @@ export function Style() {
       .cost-row-label{ font-size:12.5px; color:var(--ink); flex:1; }
       .cost-row-input{ display:flex; align-items:center; gap:5px; background:var(--cream); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
       .cost-row-input span{ font-size:10.5px; color:var(--muted); font-weight:600; }
-      .cost-row-input input{ width:72px; border:none; background:none; font-size:16px; text-align:right; font-family:inherit; }
+      .cost-row-input input{ width:64px; border:none; background:none; font-size:16px; text-align:right; font-family:inherit; }
       .cost-row-input input:focus{ outline:none; }
       .settings-menu{ display:flex; flex-direction:column; gap:2px; }
       .settings-menu-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:8px; text-align:left; }
@@ -5109,6 +5641,10 @@ export function Style() {
       .stat{ background:#fff; border:1px solid var(--line); border-left:4px solid var(--gold); border-radius:8px; padding:12px; }
       .stat-value{ display:block; font-family:'Playfair Display',serif; font-size:20px; font-weight:700; color:var(--navy); }
       .stat-label{ font-size:11.5px; color:var(--muted); }
+      .stat-trend{ display:block; font-size:10.5px; font-weight:700; margin-top:3px; }
+      .stat-trend-up{ color:#2F6B33; }
+      .stat-trend-down{ color:var(--red); }
+      .stat-trend-flat{ color:var(--muted); font-weight:600; }
 
       .insight-card{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; }
       .insight-card h4{ font-family:'Playfair Display',serif; font-size:15px; margin:0 0 2px; color:var(--navy); }
@@ -5175,8 +5711,14 @@ export function Style() {
       .note-row:last-child{ border-bottom:none; }
       .note-text{ font-size:13px; margin-bottom:2px; white-space:pre-wrap; }
       .mini-btn{ margin-top:6px; background:none; border:1px solid var(--navy); color:var(--navy); font-size:11.5px; font-weight:700; padding:4px 9px; border-radius:999px; }
+      .record-summary{ background:var(--cream); border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+      .record-summary-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+      .record-summary-top .mini-btn{ margin-top:0; flex:0 0 auto; }
       .mini-tag{ display:inline-block; margin-top:6px; font-size:11px; color:#2F6B33; background:#E9F3EA; padding:3px 8px; border-radius:999px; }
       .existing-client-note{ background:#E9F3EA; border:1px solid #CBE3CD; border-radius:8px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; }
+      .agreed-value-prompt{ background:var(--cream); border:1px solid var(--gold); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:10px; }
+      .agreed-value-prompt-text{ font-size:13px; color:var(--ink); margin:0; line-height:1.5; }
+      .agreed-value-prompt-actions{ display:flex; gap:8px; flex-wrap:wrap; }
       .existing-client-tag{ font-size:12.5px; font-weight:600; color:#2F6B33; }
       .existing-client-stats{ display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:#2F6B33; font-weight:600; }
       .suggest-list{ display:flex; flex-direction:column; gap:6px; max-height:240px; overflow-y:auto; }
