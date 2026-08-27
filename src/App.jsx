@@ -140,6 +140,12 @@ const DEFAULT_REFERRAL_TYPES = [
   "Other",
 ];
 
+// Resource People are deliberately kept outside the revenue-tracking model entirely — no stage, no
+// fee, no responsible partner, nothing that could ever end up counted in Insights. They're a
+// directory, not a pipeline: specialists to call when a brief lands outside the firm's own
+// expertise, and execution support (clerks, registry contacts) who help get existing work done.
+const RESOURCE_PEOPLE_CATEGORIES = ["Specialist Advisor", "Execution Support"];
+
 // "Next action" suggestions have two layers, kept deliberately separate:
 //  1. A curated starter list per record type, below — edited only when someone deliberately visits
 //     Settings and changes it. Nothing ever gets written into this list automatically.
@@ -313,6 +319,7 @@ function ensureClientsForWonProspects(prospects, clients) {
         instructedOn: p.opportunity || "",
         potentialNeeds: "",
         responsiblePartner: p.responsiblePartner || "",
+        origin: p.source || "",
         lastContact: todayISO(),
         nextAction: "",
         nextActionDate: "",
@@ -350,6 +357,14 @@ const daysBetween = (a, b) => Math.round((new Date(b) - new Date(a)) / 86400000)
 const addDays = (dateStr, n) => {
   const d = new Date(dateStr + "T00:00:00");
   d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+// A retainer renewal is recurring, not a one-off — marking it done should push the date forward by
+// the retainer's own cycle (a month or a year out), not just clear it into nothing.
+const advanceRetainerDate = (dateStr, frequency) => {
+  const d = new Date(dateStr + "T00:00:00");
+  if (frequency === "Annual") d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
   return d.toISOString().slice(0, 10);
 };
 // Builds a standard Sun–Sat month grid for a given "YYYY-MM" — null cells pad the leading and
@@ -660,6 +675,7 @@ function useStorage() {
   const [sectors, setSectors] = useState(DEFAULT_SECTORS);
   const [referralTypes, setReferralTypes] = useState(DEFAULT_REFERRAL_TYPES);
   const [nextActionTemplates, setNextActionTemplates] = useState(DEFAULT_NEXT_ACTION_TEMPLATES);
+  const [resourcePeople, setResourcePeople] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -674,7 +690,7 @@ function useStorage() {
         };
         const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
         const defaultTargets = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.target]));
-        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat] = await Promise.all([
+        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp] = await Promise.all([
           safe("kkn-partners", DEFAULT_PARTNERS),
           safe("kkn-prospects", []),
           safe("kkn-referrals", []),
@@ -694,6 +710,7 @@ function useStorage() {
           safe("kkn-referral-types", DEFAULT_REFERRAL_TYPES),
           safe("kkn-activity-targets", defaultTargets),
           safe("kkn-next-action-templates", DEFAULT_NEXT_ACTION_TEMPLATES),
+          safe("kkn-resource-people", []),
         ]);
         setPartners(pt);
         setProspects(pr);
@@ -721,6 +738,7 @@ function useStorage() {
         setReferralTypes(rt && rt.length > 0 ? rt : DEFAULT_REFERRAL_TYPES);
         setActivityTargets({ ...defaultTargets, ...at });
         setNextActionTemplates({ ...DEFAULT_NEXT_ACTION_TEMPLATES, ...nat });
+        setResourcePeople(rp);
       } catch (e) {
         setError("Could not load shared data. You can keep working; changes may not save.");
       } finally {
@@ -852,6 +870,7 @@ function useStorage() {
                   instructedOn: p.opportunity || "",
                   potentialNeeds: "",
                   responsiblePartner: p.responsiblePartner || "",
+                  origin: p.source || "",
                   lastContact: todayISO(),
                   nextAction: "",
                   nextActionDate: "",
@@ -944,6 +963,20 @@ function useStorage() {
         setNextActionTemplates(next);
         persist("kkn-next-action-templates", next);
       },
+      resourcePeople,
+      saveResourcePerson: (rp) => {
+        const exists = resourcePeople.some((x) => x.id === rp.id);
+        const next = exists
+          ? resourcePeople.map((x) => (x.id === rp.id ? rp : x))
+          : [...resourcePeople, { firmId: rp.firmId || CURRENT_FIRM_ID, ...rp }];
+        setResourcePeople(next);
+        persist("kkn-resource-people", next);
+      },
+      deleteResourcePerson: (id) => {
+        const next = resourcePeople.filter((x) => x.id !== id);
+        setResourcePeople(next);
+        persist("kkn-resource-people", next);
+      },
       undoActivity: (type, partnerId) => {
         const idx = [...activity]
           .reverse()
@@ -1016,7 +1049,7 @@ function useStorage() {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, persist]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, persist]
   );
 
   return { ready, error, ...api };
@@ -1333,9 +1366,17 @@ function collectReminders(store) {
     if (c.nextActionDate) {
       items.push({ kind: "client", id: c.id, title: c.name, action: c.nextAction, date: c.nextActionDate, ownerId: c.responsiblePartner, ref: c });
     }
+    if (c.hasRetainer && c.retainerRenewalDate) {
+      items.push({ kind: "retainer", id: c.id, title: c.name, action: `Renew retainer (${c.retainerFrequency || "recurring"})`, date: c.retainerRenewalDate, ownerId: c.responsiblePartner, ref: c });
+    }
   });
   store.tenders.forEach((t) => {
-    if (t.nextActionDate && t.stage !== "result") {
+    // A one-shot tender's story ends at Result — no more action needed, so reminders stop. A won
+    // empanelment reaching Result is the opposite: that's when the ongoing relationship (and its
+    // renewal cycle) actually begins, so its next-action reminders should keep firing past that
+    // stage. A lost or withdrawn empanelment application has truly concluded, same as a lost tender.
+    const stillNeedsReminders = t.stage !== "result" || (t.kind === "empanelment" && t.outcome === "Won");
+    if (t.nextActionDate && stillNeedsReminders) {
       items.push({ kind: "tender", id: t.id, title: t.title, action: t.nextAction, date: t.nextActionDate, ownerId: t.responsiblePartner, ref: t });
     }
   });
@@ -1359,12 +1400,19 @@ function TenderStageRail({ stage }) {
   );
 }
 
-function TenderCard({ t, partners, seenMap, onOpen, permissions = ROLE_PERMISSIONS.partner }) {
+function TenderCard({ t, partners, seenMap, onOpen, permissions = ROLE_PERMISSIONS.partner, onArchiveToggle }) {
   const score = tenderScore(t);
   const noBid = score > 0 && score < 50;
-  const overdue = t.deadline && daysBetween(t.deadline, todayISO()) > 0 && !["submission", "follow_up", "result"].includes(t.stage);
+  // "submission"/"follow_up" always mean the deadline has already passed by design, for either
+  // kind — but "result" only ends the story for a one-shot tender, or an empanelment that didn't
+  // win. A won empanelment reaching Result is when its renewal cycle begins, so its (renamed)
+  // deadline field should keep being checked past that point.
+  const empanelmentWonCard = t.kind === "empanelment" && t.outcome === "Won";
+  const dormantStages = empanelmentWonCard ? ["submission", "follow_up"] : ["submission", "follow_up", "result"];
+  const overdue = t.deadline && daysBetween(t.deadline, todayISO()) > 0 && !dormantStages.includes(t.stage);
   const owner = partners.find((x) => x.id === t.responsiblePartner);
   const unseen = tenderActivityCount(t) - (seenMap?.[t.id] || 0);
+  const canArchive = onArchiveToggle && t.outcome;
   return (
     <button className="card" onClick={() => onOpen(t)}>
       <div className="card-top">
@@ -1373,14 +1421,25 @@ function TenderCard({ t, partners, seenMap, onOpen, permissions = ROLE_PERMISSIO
       </div>
       <TenderStageRail stage={t.stage} />
       <div className="card-meta">
+        {t.kind === "empanelment" && <Pill tone="score">Empanelment</Pill>}
+        {t.outcome && <Pill tone={t.outcome === "Won" ? "score" : t.outcome === "Lost" ? "score-low" : "owner"}>{t.outcome}</Pill>}
         {t.procuringEntity && <Pill>{t.procuringEntity}</Pill>}
         {owner && <Pill tone="owner">{owner.name}</Pill>}
         {permissions.seeMetrics && <Pill tone={noBid ? "score-low" : "score"}>{score}/{SCORE_MAX}</Pill>}
         <UpdateBadge count={unseen} />
+        {canArchive && (
+          <button
+            type="button"
+            className="archive-badge"
+            onClick={(e) => { e.stopPropagation(); onArchiveToggle(t); }}
+          >
+            {t.archived ? "↩ Unarchive" : "🗄 Archive"}
+          </button>
+        )}
       </div>
       {(overdue || (noBid && permissions.seeMetrics)) && (
         <div className="flags">
-          {overdue && <span className="flag flag-red">Deadline passed</span>}
+          {overdue && <span className="flag flag-red">{t.kind === "empanelment" ? "Renewal overdue" : "Deadline passed"}</span>}
           {noBid && permissions.seeMetrics && <span className="flag flag-amber">Below 50 — consider no-bid</span>}
         </div>
       )}
@@ -2546,7 +2605,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
   );
 }
 
-function ClientModal({ item, partners, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ClientModal({ item, partners, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onLogNewWork, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     item
       ? {
@@ -2554,6 +2613,11 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           clientType: item.clientType || CLIENT_TYPES[0],
           contact: item.contact || "",
           position: item.position || "",
+          origin: item.origin || "",
+          hasRetainer: item.hasRetainer || false,
+          retainerAmount: item.retainerAmount || "",
+          retainerFrequency: item.retainerFrequency || "Monthly",
+          retainerRenewalDate: item.retainerRenewalDate || "",
           notes: "",
           notesHistory:
             item.notesHistory ||
@@ -2571,6 +2635,10 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           responsiblePartner: partners[0]?.id || "",
           contactPhone: "",
           contactEmail: "",
+          hasRetainer: false,
+          retainerAmount: "",
+          retainerFrequency: "Monthly",
+          retainerRenewalDate: "",
           lastContact: todayISO(),
           nextAction: "",
           nextActionDate: "",
@@ -2604,6 +2672,48 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
+          {item && (
+            <button type="button" className="chip-btn" style={{ alignSelf: "flex-start" }} onClick={() => onLogNewWork(f.name)}>
+              + Log new work for {f.name || "this client"}
+            </button>
+          )}
+          <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={f.hasRetainer}
+              onChange={(e) => setF({ ...f, hasRetainer: e.target.checked })}
+              style={{ width: 16, height: 16, accentColor: "var(--navy)" }}
+            />
+            <span>This is a retainer client</span>
+          </label>
+          {f.hasRetainer && (
+            <>
+              {permissions.seeAmounts ? (
+                <div className="row2">
+                  <Field label="Retainer amount (KES)">
+                    <input type="number" value={f.retainerAmount} onChange={set("retainerAmount")} placeholder="150000" />
+                  </Field>
+                  <Field label="Frequency">
+                    <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Annual">Annual</option>
+                    </select>
+                  </Field>
+                </div>
+              ) : (
+                <Field label="Frequency">
+                  <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                </Field>
+              )}
+              <Field label="Renewal date">
+                <input type="date" value={f.retainerRenewalDate} onChange={set("retainerRenewalDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.retainerRenewalDate} excludeId={f.id} />
+              </Field>
+            </>
+          )}
           {item && cv && cv.matterCount > 0 && canSeeClientValue && (
             <section className="client-value-block">
               <div className="vault-head">
@@ -2651,6 +2761,8 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
                 {f.sector && <Pill>{f.sector}</Pill>}
                 {f.clientType !== "Individual" && f.position && <Pill tone="owner">{f.position}</Pill>}
                 {owner && <Pill tone="owner">{owner.name}</Pill>}
+                {f.hasRetainer && <Pill tone="score">Retainer</Pill>}
+                {f.origin && <Pill tone="owner">Via {f.origin}</Pill>}
               </div>
               {f.instructedOn && <p className="reminder-action">Instructed on: {f.instructedOn}</p>}
               {f.potentialNeeds && <p className="reminder-action muted-line">Possible need: {f.potentialNeeds}</p>}
@@ -2731,7 +2843,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           <Field label="Last contact">
             <input type="date" value={f.lastContact} onChange={set("lastContact")} />
           </Field>
-          <div className="row2">
+          <div className="row-date-action">
             <Field label="Next action date">
               <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
               <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
@@ -2791,11 +2903,18 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
   );
 }
 
-function TenderModal({ tender, partners, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillTitle, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function TenderModal({ tender, partners, clients, prospects, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillTitle, onSave, onDelete, onAutoCreateClient, onAddAsWonProspect, onLogNewWork, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     tender
       ? {
           ...tender,
+          kind: tender.kind || "tender",
+          outcome: tender.outcome || "",
+          archived: tender.archived || false,
+          contact: tender.contact || "",
+          position: tender.position || "",
+          contactPhone: tender.contactPhone || "",
+          contactEmail: tender.contactEmail || "",
           notes: "",
           notesHistory:
             tender.notesHistory ||
@@ -2803,8 +2922,15 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
         }
       : {
           id: uid(),
+          kind: "tender",
+          outcome: "",
+          archived: false,
           title: prefillTitle || "",
           procuringEntity: "",
+          contact: "",
+          position: "",
+          contactPhone: "",
+          contactEmail: "",
           deadline: "",
           estimatedValue: "",
           responsiblePartner: partners[0]?.id || "",
@@ -2820,6 +2946,7 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
   );
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const [saveError, setSaveError] = useState("");
+  const [showContact, setShowContact] = useState(Boolean(tender?.contactPhone || tender?.contactEmail));
   const setScore = (k) => (e) => setF({ ...f, scores: { ...f.scores, [k]: Number(e.target.value) } });
   const total = tenderScore(f);
   const noBid = total < 50;
@@ -2835,6 +2962,47 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
   // progresses. New tenders have nothing to summarize yet, so start expanded.
   const [editingDetails, setEditingDetails] = useState(!tender);
   const owner = partners.find((p) => p.id === f.responsiblePartner);
+  // Empanelment is an "award" workflow, not a sales pipeline — the real value never lives on this
+  // record itself, it lives on whatever actual instructions come through afterward, tracked as
+  // ordinary matters against a Client record for the same institution. This surfaces that Client
+  // Value directly here, the same mechanism already used elsewhere for repeat business. Gated on an
+  // actual Won outcome (not just reaching the final stage, and not just having typed a name) — an
+  // application that's still pending or was turned down shouldn't prematurely offer to link a
+  // client relationship that doesn't exist yet.
+  //
+  // Critically, this reads `tender` (the saved prop) rather than `f` (the live, possibly-unsaved
+  // form) — auto-creating a client, and unlocking "Log new work," are real, consequential actions.
+  // If they fired off an unsaved "Won" selection, someone could close this form without ever
+  // hitting Save and still end up with a real Client record (and even logged work) for an
+  // empanelment that was never actually persisted to the Tenders store — a phantom entry that would
+  // never show up in Insights' empanelment counts. Gating on the saved record forces Save first,
+  // then the client-linking and work-logging unlock on reopen — deliberate, not accidental.
+  const empanelmentWon = tender?.kind === "empanelment" && tender?.outcome === "Won";
+  const matchedInstitutionClient = empanelmentWon
+    ? (clients || []).find((c) => (c.name || "").trim().toLowerCase() === (f.procuringEntity || "").trim().toLowerCase() && f.procuringEntity.trim())
+    : null;
+  const institutionClientValue = matchedInstitutionClient ? clientValue(matchedInstitutionClient.name, prospects) : null;
+  // Existing client names, for type-ahead on Institution/Procuring entity — this is exactly what
+  // needs to match (whitespace, casing, everything) for the "Linked to client" panel above to
+  // trigger, so suggesting the exact stored name beats hoping someone retypes it identically.
+  const institutionSuggestions = (clients || []).map((c) => c.name).filter(Boolean);
+  // A regular Tender's win IS the business — unlike empanelment, there's no separate sales pipeline
+  // needed afterward, since the tender's own stages already represented that journey. This checks
+  // whether it's already been logged as a won prospect, so the action below doesn't create a dupe.
+  const alreadyLoggedAsWon = (prospects || []).some((p) => p.source === "Tender" && p.sourceDetailId === f.id);
+  const [justLoggedWon, setJustLoggedWon] = useState(false);
+  // Creating a Client record carries no revenue with it — unlike logging a won tender, there's no
+  // number here that could silently corrupt real financial reporting, so this fires automatically
+  // the moment an empanelment is won, the same way a won prospect already auto-creates a client
+  // today with no manual step. The guard just stops it firing again before the `clients` prop has
+  // caught up with the just-created record on the next render.
+  const [autoCreateAttempted, setAutoCreateAttempted] = useState(false);
+  useEffect(() => {
+    if (empanelmentWon && f.procuringEntity.trim() && !matchedInstitutionClient && !autoCreateAttempted) {
+      onAutoCreateClient(f.procuringEntity);
+      setAutoCreateAttempted(true);
+    }
+  }, [empanelmentWon, f.procuringEntity, matchedInstitutionClient, autoCreateAttempted]);
   useEffect(() => {
     if (tender) markSeen?.(tender.id, tenderActivityCount(tender));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2864,28 +3032,64 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
                 <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
               </div>
               <div className="card-meta">
+                {f.kind === "empanelment" && <Pill tone="score">Empanelment</Pill>}
+                {f.outcome && <Pill tone={f.outcome === "Won" ? "score" : f.outcome === "Lost" ? "score-low" : "owner"}>{f.outcome}</Pill>}
                 {f.procuringEntity && <Pill>{f.procuringEntity}</Pill>}
                 {owner && <Pill tone="owner">{owner.name}</Pill>}
                 {permissions.seeAmounts && <Pill tone="owner">{fmtKES(f.estimatedValue)}</Pill>}
               </div>
-              {f.deadline && <p className="reminder-action">Submission deadline: {f.deadline}</p>}
+              {f.deadline && (
+                <p className="reminder-action">{f.kind === "empanelment" ? "Renewal date" : "Submission deadline"}: {f.deadline}</p>
+              )}
+              {f.contact && <p className="reminder-action muted-line">{f.contact}{f.position ? ` — ${f.position}` : ""}</p>}
+              <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />
             </div>
           ) : (
             <>
+              <Field label="Type">
+                <select value={f.kind} onChange={set("kind")}>
+                  <option value="tender">Tender</option>
+                  <option value="empanelment">Empanelment</option>
+                </select>
+              </Field>
               <Field label="Tender title">
                 <input value={f.title} onChange={set("title")} placeholder="Nairobi City County — legal services panel" />
               </Field>
               <div className="row2">
-                <Field label="Procuring entity">
-                  <input value={f.procuringEntity} onChange={set("procuringEntity")} placeholder="Nairobi City County" />
+                <Field label={f.kind === "empanelment" ? "Institution" : "Procuring entity"}>
+                  <SuggestInput value={f.procuringEntity} onChange={set("procuringEntity")} suggestions={institutionSuggestions} placeholder="Nairobi City County" />
                 </Field>
-                <Field label="Submission deadline">
+                <Field label={f.kind === "empanelment" ? "Renewal date" : "Submission deadline"}>
                   <input type="date" value={f.deadline} onChange={set("deadline")} />
                 </Field>
               </div>
+              <div className="row2">
+                <Field label="Contact person">
+                  <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                </Field>
+                <Field label="Position">
+                  <input value={f.position} onChange={set("position")} placeholder="Procurement Officer" />
+                </Field>
+              </div>
+              <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
+                {showContact
+                  ? "− Hide contact details"
+                  : (f.contactPhone || f.contactEmail) ? "👁 View contact details" : "+ Add contact details (optional)"}
+              </button>
+              {showContact && (
+                <div className="row2">
+                  <Field label="Phone">
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
+                  </Field>
+                </div>
+              )}
+              {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
               {permissions.seeAmounts ? (
                 <div className="row2">
-                  <Field label="Estimated value (KES)">
+                  <Field label={f.kind === "empanelment" ? "Est. annual value (optional)" : "Estimated value (KES)"}>
                     <input type="number" value={f.estimatedValue} onChange={set("estimatedValue")} placeholder="1200000" />
                   </Field>
                   <Field label="Responsible partner">
@@ -2901,6 +3105,38 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
                   </select>
                 </Field>
               )}
+              {f.kind === "empanelment" && (
+                <p className="insight-note" style={{ margin: 0 }}>
+                  This is just a rough planning figure — an empanelment's real worth is whatever actual instructions come through afterward, tracked below once linked to a client.
+                </p>
+              )}
+              {empanelmentWon && f.procuringEntity.trim() && (
+                matchedInstitutionClient ? (
+                  <div className="existing-client-note">
+                    <span className="existing-client-tag">✓ {matchedInstitutionClient.name} added as a client — awarded work from here on gets logged on their client record, not this one</span>
+                    {(permissions.seeAmounts || permissions.seeMetrics) && institutionClientValue && (
+                      <div className="existing-client-stats">
+                        {permissions.seeMetrics && (
+                          <span>{institutionClientValue.matterCount} matter{institutionClientValue.matterCount === 1 ? "" : "s"} so far</span>
+                        )}
+                        {permissions.seeAmounts && <span>{fmtKES(institutionClientValue.wonValue)} won</span>}
+                        {permissions.seeAmounts && institutionClientValue.pipelineValue > 0 && (
+                          <span>{fmtKES(institutionClientValue.pipelineValue)} in pipeline</span>
+                        )}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="mini-btn"
+                      onClick={() => onLogNewWork(matchedInstitutionClient.name)}
+                    >
+                      + Log new work for {matchedInstitutionClient.name}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="insight-note" style={{ margin: 0 }}>Setting up the client record…</p>
+                )
+              )}
             </>
           )}
           <Field label="Pipeline stage">
@@ -2910,7 +3146,56 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
               ))}
             </select>
           </Field>
-          <div className="row2">
+          {f.stage === "result" && (
+            <>
+              <Field label="Outcome">
+                <select value={f.outcome} onChange={set("outcome")}>
+                  <option value="">— Not yet decided —</option>
+                  <option value="Won">Won</option>
+                  <option value="Lost">Lost</option>
+                  <option value="Withdrawn">Withdrawn</option>
+                </select>
+              </Field>
+              {f.kind === "tender" && f.outcome === "Won" && !(tender?.kind === "tender" && tender?.outcome === "Won") && (
+                <p className="insight-note" style={{ margin: 0 }}>Tap Save tender below first. Once saved, you can log this as won business.</p>
+              )}
+              {f.kind === "empanelment" && f.outcome === "Won" && !empanelmentWon && (
+                <p className="insight-note" style={{ margin: 0 }}>Tap Save tender below first. Once saved, {f.procuringEntity || "this institution"} will be added as a client — log every new piece of work they give you from their client page from then on, not here.</p>
+              )}
+              {tender?.kind === "tender" && tender?.outcome === "Won" && (
+                alreadyLoggedAsWon ? (
+                  <p className="mini-tag" style={{ alignSelf: "flex-start" }}>
+                    ✓ Logged as won business — agreed value, payments, and further updates now happen on that record, not here
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    className="chip-btn"
+                    onClick={() => {
+                      onAddAsWonProspect(f);
+                      setJustLoggedWon(true);
+                      setTimeout(() => setJustLoggedWon(false), 2000);
+                    }}
+                  >
+                    {justLoggedWon ? "✓ Logged as won business" : "+ Log as won business"}
+                  </button>
+                )
+              )}
+              <Field label="Result / lessons learned">
+                <input value={f.result} onChange={set("result")} placeholder="Why — pricing, relationship, technical score..." />
+              </Field>
+              {f.outcome && (
+                <button
+                  type="button"
+                  className="voice-fill-trigger"
+                  onClick={() => setF({ ...f, archived: !f.archived })}
+                >
+                  {f.archived ? "↩ Restore from archive" : "🗄 Archive this tender"}
+                </button>
+              )}
+            </>
+          )}
+          <div className="row-date-action">
             <Field label="Next action date">
               <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
               <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
@@ -2955,9 +3240,6 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
             </div>
           )}
 
-          <Field label="Result / lessons learned">
-            <input value={f.result} onChange={set("result")} placeholder="Won / lost / withdrawn — why" />
-          </Field>
           <HistoryLog history={f.stageHistory} partners={partners} stageLabel={stageLabel} />
           <NoteLog notes={f.notesHistory} partners={partners} />
           <VoiceField
@@ -2999,8 +3281,17 @@ function TenderModal({ tender, partners, nextActionSuggestions, permissions = RO
               const nextNotesHistory = noteText
                 ? [...(f.notesHistory || []), { text: noteText, date: todayISO(), partnerId: me }]
                 : f.notesHistory || [];
-              onSave({ ...f, notes: "", notesHistory: nextNotesHistory, stageHistory: nextHistory });
+              const saved = { ...f, notes: "", notesHistory: nextNotesHistory, stageHistory: nextHistory };
+              onSave(saved);
               markSeen?.(f.id, nextHistory.length + nextNotesHistory.length);
+              // The client needs to be created right here, at the moment of saving — waiting on the
+              // `tender` prop to reflect this on a later render doesn't work, because the modal
+              // closes in this same instant. Using `saved` (what's actually being persisted right
+              // now) rather than the stale `matchedInstitutionClient` computed from props avoids
+              // that exact one-save-behind lag.
+              if (saved.kind === "empanelment" && saved.outcome === "Won" && saved.procuringEntity.trim() && !matchedInstitutionClient) {
+                onAutoCreateClient(saved.procuringEntity);
+              }
               onClose();
             }}
           >
@@ -3269,6 +3560,225 @@ function SectorsPage({ store }) {
   );
 }
 
+// A resource person's own contact/notes shape mirrors ReferralModal's, minus everything that
+// implies revenue tracking — no fee, no stage, no responsible partner. This is a directory entry,
+// not a pipeline record.
+function ResourcePersonModal({ item, me, referrals, onSave, onDelete, onAddAsReferral, onClose }) {
+  const [f, setF] = useState(
+    item
+      ? {
+          ...item,
+          notes: "",
+          notesHistory: item.notesHistory || [],
+        }
+      : {
+          id: uid(),
+          name: "",
+          category: RESOURCE_PEOPLE_CATEGORIES[0],
+          institution: "",
+          usefulFor: "",
+          phone: "",
+          email: "",
+          notes: "",
+          notesHistory: [],
+        }
+  );
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const [saveError, setSaveError] = useState("");
+  const [showContact, setShowContact] = useState(Boolean(f.phone || f.email));
+  // Existing resource people collapse the rarely-changing identity fields (name, category,
+  // institution, what they're useful for, contact details) into a compact summary — Notes stays
+  // live below, since that's what actually gets touched over time. New entries start expanded,
+  // since there's nothing to summarize yet.
+  const [editingDetails, setEditingDetails] = useState(!item);
+  const alreadyReferralPartner = (referrals || []).some(
+    (r) => (r.name || "").trim().toLowerCase() === (f.name || "").trim().toLowerCase() && f.name.trim()
+  );
+  const [justPromoted, setJustPromoted] = useState(false);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <h3>{item ? "Edit resource person" : "New resource person"}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="sheet-body">
+          {!editingDetails ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org">{f.name || "Unnamed"}</span>
+                <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
+              </div>
+              <div className="card-meta">
+                <Pill tone="owner">{f.category}</Pill>
+                {f.institution && <Pill>{f.institution}</Pill>}
+              </div>
+              {f.usefulFor && <p className="reminder-action muted-line">{f.usefulFor}</p>}
+              <ContactLinkRow phone={f.phone} email={f.email} />
+            </div>
+          ) : (
+            <>
+              <Field label="Name">
+                <input value={f.name} onChange={set("name")} placeholder="e.g. Dr. Achieng Otieno" autoFocus />
+              </Field>
+              <div className="row2">
+                <Field label="Category">
+                  <select value={f.category} onChange={set("category")}>
+                    {RESOURCE_PEOPLE_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                  </select>
+                </Field>
+                <Field label="Institution (optional)">
+                  <input value={f.institution} onChange={set("institution")} placeholder="e.g. Nairobi Registry" />
+                </Field>
+              </div>
+              <VoiceField
+                label="What they're useful for"
+                value={f.usefulFor}
+                onChange={set("usefulFor")}
+                placeholder="e.g. International tax opinions, land registry filings"
+              />
+              <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
+                {showContact
+                  ? "− Hide contact details"
+                  : (f.phone || f.email) ? "👁 View contact details" : "+ Add contact details (optional)"}
+              </button>
+              {showContact && (
+                <div className="row2">
+                  <Field label="Phone">
+                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254 7XX XXX XXX" />
+                  </Field>
+                  <Field label="Email">
+                    <input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" />
+                  </Field>
+                </div>
+              )}
+              {showContact && <ContactLinkRow phone={f.phone} email={f.email} />}
+            </>
+          )}
+          {item && (
+            <button
+              type="button"
+              className="voice-fill-trigger"
+              disabled={alreadyReferralPartner}
+              onClick={() => {
+                onAddAsReferral(f);
+                setJustPromoted(true);
+                setTimeout(() => setJustPromoted(false), 2000);
+              }}
+            >
+              {justPromoted
+                ? "✓ Added as referral partner"
+                : alreadyReferralPartner
+                ? "Already a referral partner"
+                : "→ Add as referral partner"}
+            </button>
+          )}
+          <NoteLog notes={f.notesHistory} partners={[]} />
+          <VoiceField
+            label="Add a note"
+            value={f.notes}
+            onChange={set("notes")}
+            textarea
+            rows={3}
+            placeholder="Context — saved as a new dated note"
+          />
+        </div>
+        <div className="sheet-actions">
+          {saveError && <p className="save-error">⚠️ {saveError}</p>}
+          {item && (
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
+              Delete
+            </ConfirmButton>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              if (!f.name.trim()) {
+                setSaveError("Name is required before this can be saved.");
+                return;
+              }
+              setSaveError("");
+              const noteText = f.notes.trim();
+              const nextNotesHistory = noteText
+                ? [...(f.notesHistory || []), { text: noteText, date: todayISO(), partnerId: me }]
+                : f.notesHistory || [];
+              onSave({ ...f, notes: "", notesHistory: nextNotesHistory });
+              onClose();
+            }}
+          >
+            {item ? "Update resource person" : "Save resource person"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResourcePeoplePage({ store, me }) {
+  const [search, setSearch] = useState("");
+  const [openPerson, setOpenPerson] = useState(undefined); // undefined=closed, null=new, obj=edit
+  const visible = store.resourcePeople.filter((rp) =>
+    matchesSearch(search, [rp.name, rp.category, rp.institution, rp.usefulFor])
+  );
+
+  return (
+    <>
+      <p className="insight-note">
+        A directory, not a pipeline — specialists to call when a brief lands outside the firm's own expertise, and execution support (clerks, registry contacts) who help get existing work done. Nothing here carries a fee, a stage, or a responsible partner, and none of it feeds Insights — this is contacts, not revenue.
+      </p>
+      <SearchBox value={search} onChange={setSearch} placeholder="Search name, category, institution…" />
+      <div className="card-list">
+        {store.resourcePeople.length === 0 && <p className="empty">No resource people added yet.</p>}
+        {visible.map((rp) => (
+          <button key={rp.id} className="card" onClick={() => setOpenPerson(rp)}>
+            <div className="card-top">
+              <span className="org">{rp.name}</span>
+            </div>
+            <div className="card-meta">
+              <Pill tone="owner">{rp.category}</Pill>
+              {rp.institution && <Pill>{rp.institution}</Pill>}
+            </div>
+            {rp.usefulFor && <p className="reminder-action muted-line">{rp.usefulFor}</p>}
+          </button>
+        ))}
+      </div>
+      <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => setOpenPerson(null)}>
+        + New resource person
+      </button>
+      {openPerson !== undefined && (
+        <ResourcePersonModal
+          item={openPerson}
+          me={me}
+          referrals={store.referrals}
+          onSave={store.saveResourcePerson}
+          onDelete={store.deleteResourcePerson}
+          onAddAsReferral={(rp) => {
+            store.saveReferral({
+              id: uid(),
+              name: rp.name,
+              institution: rp.institution || "",
+              type: "",
+              practiceFed: [],
+              responsiblePartner: me,
+              phone: rp.phone || "",
+              email: rp.email || "",
+              lastContact: todayISO(),
+              nextAction: "",
+              nextActionDate: "",
+              notesHistory: [
+                ...(rp.notesHistory || []),
+                { text: "Promoted from Resource People — was a specialist contact, now also an active referral source.", date: todayISO(), partnerId: me },
+              ],
+            });
+          }}
+          onClose={() => setOpenPerson(undefined)}
+        />
+      )}
+    </>
+  );
+}
+
 function ReferralTypesPage({ store }) {
   return (
     <EditableListPage
@@ -3343,9 +3853,10 @@ const SETTINGS_PAGES = [
   { key: "sectors", label: "Sectors", desc: "The industry list prospects and clients get categorized under", Component: SectorsPage },
   { key: "referralTypes", label: "Referral Types", desc: "The professions a referral partner can be tagged with", Component: ReferralTypesPage },
   { key: "nextActions", label: "Next Action Templates", desc: "Starter phrases suggested for Next Action, by record type", Component: NextActionTemplatesPage },
+  { key: "resourcePeople", label: "Resource People", desc: "Specialist advisors and execution support to call on — not a pipeline", Component: ResourcePeoplePage },
 ];
 
-function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, onClose }) {
+function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, onClose }) {
   const [page, setPage] = useState(null); // null = menu, or a SETTINGS_PAGES key
   const visiblePages = SETTINGS_PAGES.filter(
     (p) => (!p.requiresAmounts || permissions.seeAmounts) && (!p.partnerOnly || permissions.manageRoles)
@@ -3366,7 +3877,7 @@ function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, onClose 
         </div>
         <div className="sheet-body">
           {active ? (
-            <active.Component store={store} />
+            <active.Component store={store} me={me} />
           ) : (
             <div className="settings-menu">
               {visiblePages.map((p) => (
@@ -3477,6 +3988,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState({});
   const [tenderCollapsed, setTenderCollapsed] = useState({});
   const [showArchived, setShowArchived] = useState({});
+  const [showArchivedTenders, setShowArchivedTenders] = useState({});
   const [notifOpen, setNotifOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
@@ -3512,30 +4024,6 @@ export default function App() {
   useEffect(() => {
     document.title = "Bidi Revenue Engine";
   }, []);
-
-  // Locks background scroll while any modal/overlay is open. Without this, iOS Safari can scroll
-  // the page behind a fixed-position modal when a form field inside it is focused, dragging the
-  // modal (and its close button) out of alignment with what's actually on screen.
-  const anyModalOpen =
-    openProspect !== undefined ||
-    openReferral !== undefined ||
-    openTender !== undefined ||
-    openClient !== undefined ||
-    openReferralImpact !== undefined ||
-    notifOpen ||
-    settingsOpen;
-  useEffect(() => {
-    if (anyModalOpen) {
-      const scrollY = window.scrollY;
-      document.body.style.top = `-${scrollY}px`;
-      document.body.classList.add("modal-open");
-      return () => {
-        document.body.classList.remove("modal-open");
-        document.body.style.top = "";
-        window.scrollTo(0, scrollY);
-      };
-    }
-  }, [anyModalOpen]);
 
   if (!store.ready) {
     return (
@@ -3640,7 +4128,7 @@ export default function App() {
         />
       )}
 
-      {settingsOpen && <SettingsModal store={store} permissions={myPermissions} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal store={store} permissions={myPermissions} me={me} onClose={() => setSettingsOpen(false)} />}
 
       <nav className="tabs">
         {[
@@ -3786,6 +4274,8 @@ export default function App() {
               .filter((t) => t.stage === s.key)
               .filter((t) => matchesSearch(searchTenders, [t.title, t.procuringEntity]))
               .filter((t) => filterTendersPartner === "all" || t.responsiblePartner === filterTendersPartner);
+            const activeItems = items.filter((t) => !t.archived);
+            const archivedItems = items.filter((t) => t.archived);
             return (
               <section key={s.key} className="stage-group">
                 <button
@@ -3801,9 +4291,41 @@ export default function App() {
                 </button>
                 {!tenderCollapsed[s.key] && (
                   <div className="card-list">
-                    {items.length === 0 && <p className="empty">Nothing here yet.</p>}
-                    {items.map((t) => (
-                      <TenderCard key={t.id} t={t} partners={store.partners} seenMap={store.seenTenders} onOpen={setOpenTender} permissions={myPermissions} />
+                    {activeItems.length === 0 && archivedItems.length === 0 && <p className="empty">Nothing here yet.</p>}
+                    {activeItems.length === 0 && archivedItems.length > 0 && !showArchivedTenders[s.key] && (
+                      <p className="empty">Everything here is archived.</p>
+                    )}
+                    {activeItems.map((t) => (
+                      <TenderCard
+                        key={t.id}
+                        t={t}
+                        partners={store.partners}
+                        seenMap={store.seenTenders}
+                        onOpen={setOpenTender}
+                        permissions={myPermissions}
+                        onArchiveToggle={(tenderItem) => store.saveTender({ ...tenderItem, archived: !tenderItem.archived })}
+                      />
+                    ))}
+                    {archivedItems.length > 0 && (
+                      <button
+                        type="button"
+                        className="chip-btn chip-ghost"
+                        style={{ alignSelf: "flex-start" }}
+                        onClick={() => setShowArchivedTenders({ ...showArchivedTenders, [s.key]: !showArchivedTenders[s.key] })}
+                      >
+                        {showArchivedTenders[s.key] ? "− Hide" : "🗄 Show"} {archivedItems.length} archived
+                      </button>
+                    )}
+                    {showArchivedTenders[s.key] && archivedItems.map((t) => (
+                      <TenderCard
+                        key={t.id}
+                        t={t}
+                        partners={store.partners}
+                        seenMap={store.seenTenders}
+                        onOpen={setOpenTender}
+                        permissions={myPermissions}
+                        onArchiveToggle={(tenderItem) => store.saveTender({ ...tenderItem, archived: !tenderItem.archived })}
+                      />
                     ))}
                   </div>
                 )}
@@ -3818,7 +4340,7 @@ export default function App() {
 
       {tab === "clients" && (() => {
         const visibleClients = store.clients
-          .filter((c) => matchesSearch(searchClients, [c.name, c.sector, c.instructedOn, c.potentialNeeds]))
+          .filter((c) => matchesSearch(searchClients, [c.name, c.sector, c.instructedOn, c.potentialNeeds, c.origin]))
           .filter((c) => filterClientsPartner === "all" || c.responsiblePartner === filterClientsPartner)
           .slice()
           .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
@@ -3857,6 +4379,8 @@ export default function App() {
                     <div className="card-meta">
                       {c.sector && <Pill>{c.sector}</Pill>}
                       {owner && <Pill tone="owner">{owner.name}</Pill>}
+                      {c.hasRetainer && <Pill tone="score">Retainer</Pill>}
+                      {c.origin && <Pill tone="owner">Via {c.origin}</Pill>}
                       <UpdateBadge count={unseen} />
                       {myPermissions.seeMetrics && impact.count > 0 && (
                         <button
@@ -4013,6 +4537,12 @@ export default function App() {
           prefillName={clientPrefill}
           onSave={store.saveClient}
           onDelete={store.deleteClient}
+          onLogNewWork={(name) => {
+            setProspectPrefill(name);
+            setOpenProspect(null);
+            setOpenClient(undefined);
+            setClientPrefill("");
+          }}
           onClose={() => { setOpenClient(undefined); setClientPrefill(""); }}
           markSeen={store.markClientSeen}
           getDayLoad={getDayLoad}
@@ -4040,12 +4570,75 @@ export default function App() {
         <TenderModal
           tender={openTender}
           partners={store.partners}
+          clients={store.clients}
+          prospects={store.prospects}
           nextActionSuggestions={tenderNextActionSuggestions}
           permissions={myPermissions}
           me={me}
           prefillTitle={tenderPrefill}
           onSave={store.saveTender}
           onDelete={store.deleteTender}
+          onAutoCreateClient={(name) => {
+            store.saveClient({
+              id: uid(),
+              name,
+              clientType: "Institutional",
+              contact: "",
+              position: "",
+              sector: "",
+              instructedOn: "",
+              potentialNeeds: "",
+              responsiblePartner: me,
+              origin: "Empanelment",
+              contactPhone: "",
+              contactEmail: "",
+              hasRetainer: false,
+              retainerAmount: "",
+              retainerFrequency: "Monthly",
+              retainerRenewalDate: "",
+              lastContact: todayISO(),
+              nextAction: "",
+              nextActionDate: "",
+              notes: "",
+              notesHistory: [],
+            });
+          }}
+          onLogNewWork={(name) => {
+            setProspectPrefill(name);
+            setOpenProspect(null);
+            setOpenTender(undefined);
+            setTenderPrefill("");
+          }}
+          onAddAsWonProspect={(t) => {
+            store.saveProspect({
+              id: uid(),
+              organization: t.procuringEntity,
+              contact: "",
+              position: "",
+              contactPhone: "",
+              contactEmail: "",
+              sector: "",
+              practiceArea: "",
+              clientType: "Institutional",
+              opportunity: t.title,
+              estimatedFee: t.estimatedValue,
+              agreedValue: "",
+              source: "Tender",
+              sourceDetailId: t.id,
+              relationshipStrength: "Strong",
+              lastContact: todayISO(),
+              nextAction: "",
+              nextActionDate: "",
+              responsiblePartner: t.responsiblePartner,
+              probability: 100,
+              status: "won",
+              archived: false,
+              payments: [],
+              notes: "",
+              notesHistory: [],
+              statusHistory: [{ kind: "stage", stage: "won", date: todayISO(), partnerId: me }],
+            });
+          }}
           onClose={() => { setOpenTender(undefined); setTenderPrefill(""); }}
           markSeen={store.markTenderSeen}
           getDayLoad={getDayLoad}
@@ -4065,7 +4658,7 @@ export default function App() {
   );
 }
 
-const KIND_LABEL = { prospect: "Prospect", client: "Client", tender: "Tender", referral: "Referral" };
+const KIND_LABEL = { prospect: "Prospect", client: "Client", tender: "Tender", referral: "Referral", retainer: "Retainer" };
 
 function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenProspect, setOpenClient, setOpenTender, setOpenReferral, setProspectPrefill }) {
   const [filterPartner, setFilterPartner] = useState("all");
@@ -4085,7 +4678,7 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
 
   const openFor = (item) => {
     if (item.kind === "prospect") setOpenProspect(item.ref);
-    else if (item.kind === "client") setOpenClient(item.ref);
+    else if (item.kind === "client" || item.kind === "retainer") setOpenClient(item.ref);
     else if (item.kind === "tender") setOpenTender(item.ref);
     else if (item.kind === "referral") setOpenReferral(item.ref);
   };
@@ -4107,11 +4700,20 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
       store.markClientSeen(item.ref.id, notesHistory.length);
     } else if (item.kind === "referral") {
       store.saveReferral({ ...item.ref, nextAction: "", nextActionDate: "" });
+    } else if (item.kind === "retainer") {
+      const noteEntry = { text: `Renewed retainer — next renewal pushed forward.`, date: todayISO(), partnerId: me };
+      const notesHistory = [...(item.ref.notesHistory || []), noteEntry];
+      store.saveClient({ ...item.ref, retainerRenewalDate: advanceRetainerDate(item.date, item.ref.retainerFrequency), notesHistory });
+      store.markClientSeen(item.ref.id, notesHistory.length);
     }
   };
 
   const reschedule = (item, newDate) => {
     if (!newDate) return;
+    if (item.kind === "retainer") {
+      store.saveClient({ ...item.ref, retainerRenewalDate: newDate });
+      return;
+    }
     const updated = { ...item.ref, nextActionDate: newDate };
     if (item.kind === "prospect") store.saveProspect(updated);
     else if (item.kind === "tender") store.saveTender(updated);
@@ -4559,6 +5161,19 @@ function Insights({ store }) {
     .filter((p) => p.status === "won")
     .reduce((sum, p) => sum + Math.max(0, effectiveDealValue(p) - paymentsReceived(p)), 0);
 
+  // Retainers and empanelments are ongoing relationships, not one-off deals — they don't have a
+  // single "won" moment, so they're deliberately computed as right-now snapshots (same category as
+  // Live pipeline value), not scoped by the all-time/by-month toggle above.
+  const clientsInScope = isDrilldown ? store.clients.filter((c) => c.responsiblePartner === selectedPartner) : store.clients;
+  const tendersInScope = isDrilldown ? store.tenders.filter((t) => t.responsiblePartner === selectedPartner) : store.tenders;
+  const retainerClients = clientsInScope.filter((c) => c.hasRetainer);
+  const mrr = retainerClients.reduce((sum, c) => {
+    const amt = Number(c.retainerAmount) || 0;
+    return sum + (c.retainerFrequency === "Annual" ? amt / 12 : amt);
+  }, 0);
+  const activeEmpanelments = tendersInScope.filter((t) => t.kind === "empanelment" && t.stage === "result");
+  const empanelmentsInProgress = tendersInScope.filter((t) => t.kind === "empanelment" && t.stage !== "result");
+
   const reachedProposal = prospects.filter((p) => reachedInScope(p, "proposal_submitted")).length;
   const wonCount = prospects.filter(isWonInScope).length;
   const winRate = reachedProposal > 0 ? Math.round((wonCount / reachedProposal) * 100) : null;
@@ -4662,7 +5277,12 @@ function Insights({ store }) {
     sourceVolumeMap[key] = (sourceVolumeMap[key] || 0) + 1;
   });
   const sourceRows = Object.entries(sourceVolumeMap)
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, count]) => {
+      const wonValue = prospects
+        .filter((p) => (p.source || "Unspecified") === name && isWonInScope(p))
+        .reduce((a, p) => a + effectiveDealValue(p), 0);
+      return { name, count, wonValue };
+    })
     .sort((a, b) => b.count - a.count);
 
   // --- Source of business: conversion ---
@@ -4774,6 +5394,20 @@ function Insights({ store }) {
   });
 
   const chartTooltip = (v) => fmtKES(v);
+  // Default Recharts tooltips only show the one series being hovered — this shows both the
+  // prospect count and the won value for that source together, so you can see at a glance whether
+  // a high-volume source is actually converting, not just how many prospects it's produced.
+  const sourceTooltip = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
+    const row = payload[0].payload;
+    return (
+      <div style={{ background: "#fff", border: "1px solid #E4DFD3", borderRadius: 8, padding: "8px 10px", fontSize: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>{row.name}</div>
+        <div>{row.count} prospect{row.count === 1 ? "" : "s"}</div>
+        <div>{row.wonValue > 0 ? `${fmtKES(row.wonValue)} won` : "Nothing won yet"}</div>
+      </div>
+    );
+  };
 
   return (
     <main className="content">
@@ -4969,6 +5603,33 @@ function Insights({ store }) {
             )}
           </section>
 
+          {(retainerClients.length > 0 || activeEmpanelments.length > 0 || empanelmentsInProgress.length > 0) && (
+            <section className="insight-card">
+              <h4>Recurring Revenue & Empanelments</h4>
+              <p className="insight-note">
+                Retainers and empanelments are ongoing relationships, not one-off deals — no single "won" moment to measure, so these are right-now snapshots rather than scoped to the all-time/by-month toggle above.
+              </p>
+              <section className="stat-grid" style={{ marginBottom: 0 }}>
+                <div className="stat">
+                  <span className="stat-value">{fmtKESExact(mrr)}</span>
+                  <span className="stat-label">Monthly recurring revenue (retainers)</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-value">{retainerClients.length}</span>
+                  <span className="stat-label">Active retainer clients</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-value">{activeEmpanelments.length}</span>
+                  <span className="stat-label">Active empanelments</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-value">{empanelmentsInProgress.length}</span>
+                  <span className="stat-label">Empanelment applications in progress</span>
+                </div>
+              </section>
+            </section>
+          )}
+
           <section className="insight-card">
             <h4>Won vs. Collected by month</h4>
             <p className="insight-note">
@@ -5090,7 +5751,7 @@ function Insights({ store }) {
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E4DFD3" />
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: "#6B7684" }} axisLine={false} tickLine={false} />
                 <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: "#1B2430" }} axisLine={false} tickLine={false} width={110} />
-                <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                <Tooltip content={sourceTooltip} />
                 <Bar dataKey="count" fill={CHART_NAVY} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -5411,7 +6072,6 @@ export function Style() {
       }
       *{box-sizing:border-box;}
       body,html,#root{height:100%; overflow-x:hidden;}
-      body.modal-open{ overflow:hidden; position:fixed; inset:0; width:100%; }
       .app,.boot{
         font-family:'DM Sans',sans-serif; background:var(--cream); color:var(--ink);
         min-height:100vh; max-width:560px; margin:0 auto; position:relative; overflow-x:hidden;
@@ -5467,7 +6127,7 @@ export function Style() {
       .month-nav .icon-btn{ font-size:20px; color:var(--navy); padding:2px 8px; }
       .month-nav .icon-btn:disabled{ opacity:0.3; }
       .search-box-wrap{ position:relative; margin-bottom:10px; }
-      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
+      .search-box{ width:100%; padding:10px 34px 10px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:13.5px; color:var(--ink); background:#fff; outline:none; -webkit-appearance:none; appearance:none; }
       .search-box::-webkit-search-cancel-button{ display:none; }
       .search-box:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .search-box::placeholder{ color:var(--muted); }
@@ -5521,22 +6181,22 @@ export function Style() {
       .reminder-done{ align-self:flex-start; margin-top:2px; }
       .reminder-actions{ display:flex; gap:8px; margin-top:2px; }
       .reschedule-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
-      .reschedule-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:16px; background:#fff; }
+      .reschedule-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; }
 
-      .fab{ position:fixed; bottom:calc(20px + env(safe-area-inset-bottom, 0px)); left:50%; transform:translateX(-50%); max-width:520px; width:calc(100% - 28px); background:var(--navy); color:#fff; border:none; padding:14px; border-radius:10px; font-weight:700; font-size:14px; box-shadow:0 8px 20px rgba(11,42,74,0.35); }
+      .fab{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); max-width:520px; width:calc(100% - 28px); background:var(--navy); color:#fff; border:none; padding:14px; border-radius:10px; font-weight:700; font-size:14px; box-shadow:0 8px 20px rgba(11,42,74,0.35); }
 
       .section-intro{ font-size:13px; color:var(--muted); margin:0 0 12px; }
 
       .overlay{ position:fixed; top:0; left:0; right:0; height:var(--vvh, 100vh); background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
       .sheet{ background:#fff; width:100%; max-width:560px; margin:0 auto; border-radius:14px 14px 0 0; max-height:min(92vh, calc(var(--vvh, 100vh) * 0.92)); display:flex; flex-direction:column; overflow-x:hidden; }
-      .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; background:#fff; flex:none; }
+      .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); }
       .sheet-head h3{ min-width:0; flex:1 1 auto; overflow-wrap:break-word; }
       .icon-btn{ flex:0 0 auto; }
       .sheet-head h3{ font-family:'Playfair Display',serif; margin:0; font-size:18px; }
       .icon-btn{ background:none; border:none; font-size:16px; color:var(--muted); }
       .sheet-body{ padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
       .field{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--muted); font-weight:600; min-width:0; }
-      .field input, .field select, .field textarea{ font-family:inherit; font-size:16px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; width:100%; min-width:0; box-sizing:border-box; }
+      .field input, .field select, .field textarea{ font-family:inherit; font-size:14px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; width:100%; min-width:0; box-sizing:border-box; }
       .field select{ text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
       .field input:focus, .field select:focus, .field textarea:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .suggest-input-wrap{ position:relative; }
@@ -5568,7 +6228,7 @@ export function Style() {
       .watchlist-note{ font-size:12.5px; color:var(--muted); margin:0; }
       .watchlist-item-actions{ display:flex; gap:8px; flex-wrap:wrap; }
       .watchlist-add{ display:flex; flex-direction:column; gap:8px; }
-      .watchlist-add input{ padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:16px; background:#fff; outline:none; }
+      .watchlist-add input{ padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; outline:none; }
       .watchlist-add input:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.18); }
       .watchlist-checkback-field{ display:flex; flex-direction:column; gap:4px; font-size:11.5px; color:var(--muted); font-weight:600; }
       .watchlist-checkback{ font-size:11px; color:var(--navy-2); background:#EAF0F6; padding:3px 8px; border-radius:999px; align-self:flex-start; }
@@ -5584,7 +6244,7 @@ export function Style() {
       .cost-row-label{ font-size:12.5px; color:var(--ink); flex:1; }
       .cost-row-input{ display:flex; align-items:center; gap:5px; background:var(--cream); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
       .cost-row-input span{ font-size:10.5px; color:var(--muted); font-weight:600; }
-      .cost-row-input input{ width:64px; border:none; background:none; font-size:16px; text-align:right; font-family:inherit; }
+      .cost-row-input input{ width:64px; border:none; background:none; font-size:13px; text-align:right; font-family:inherit; }
       .cost-row-input input:focus{ outline:none; }
       .settings-menu{ display:flex; flex-direction:column; gap:2px; }
       .settings-menu-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:8px; text-align:left; }
@@ -5614,7 +6274,7 @@ export function Style() {
       .voice-panel .input-mic-row{ gap:10px; }
       .voice-panel .input-mic-row input{
         background:#fff; height:46px; padding:0 14px; border-radius:23px; border:1px solid transparent;
-        font-size:16px; text-overflow:ellipsis; outline:none;
+        font-size:14.5px; text-overflow:ellipsis; outline:none;
       }
       .voice-panel .input-mic-row input::placeholder{ color:var(--muted); opacity:0.75; }
       .voice-panel .input-mic-row input:focus{ border-color:var(--gold); box-shadow:0 0 0 3px rgba(200,155,60,0.28); }
@@ -5625,7 +6285,8 @@ export function Style() {
       .voice-panel-actions .chip-btn:disabled{ opacity:0.35; }
       .voice-panel-actions .btn-primary{ background:var(--gold); color:var(--navy); flex:1; padding:10px; border-radius:8px; font-weight:700; }
       .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-      .sheet-actions{ display:flex; gap:10px; padding:14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); border-top:1px solid var(--line); flex:none; }
+      .row-date-action{ display:grid; grid-template-columns:1fr 1.6fr; gap:10px; }
+      .sheet-actions{ display:flex; gap:10px; padding:14px 16px; border-top:1px solid var(--line); }
       .btn{ flex:1; padding:12px; border-radius:8px; font-weight:700; font-size:14px; border:none; }
       .btn-primary{ background:var(--navy); color:#fff; }
       .btn-ghost{ background:#fff; border:1px solid var(--line); color:var(--ink); flex:0 0 auto; padding:12px 16px; }
@@ -5738,120 +6399,6 @@ export function Style() {
       .activity-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
       .chip-btn{ background:var(--navy); color:#fff; border:none; padding:6px 12px; border-radius:999px; font-size:12px; font-weight:600; }
       .chip-ghost{ background:#fff; color:var(--muted); border:1px solid var(--line); }
-
-      /* iPhone notch / status bar clearance for the sticky top bar */
-      .topbar{ padding-top:calc(14px + env(safe-area-inset-top, 0px)); }
-
-      /* Narrow phones (e.g. iPhone SE, older/smaller Android) — stack two-column layouts so
-         nothing gets cramped or clipped. */
-      @media (max-width: 380px) {
-        .row2{ grid-template-columns:1fr; }
-        .stat-grid{ grid-template-columns:1fr; }
-        .vault-grid{ grid-template-columns:1fr; }
-      }
-
-      /* Phone-width screens (iPhone 15 family and similar, ~390-430px CSS width) — ~10% smaller
-         text across the UI for a less oversized feel on modern larger phones. Form fields
-         (input/select/textarea) are deliberately left untouched here: dropping any of them below
-         16px re-triggers iOS Safari's auto-zoom-on-focus, which was fixed earlier this project. */
-      @media (max-width: 430px) {
-                .boot h1{ font-size:23.5px; }
-                .who-identity{ font-size:11px; }
-                .who-role-badge{ font-size:9px; }
-                .link-btn{ font-size:11.5px; }
-                .role-help-text{ font-size:10px; }
-                .fine{ font-size:10.5px; }
-                .brand-sub{ font-size:11px; }
-                .me-chip{ font-size:11px; }
-                .notif-bell{ font-size:12.5px; }
-                .notif-count{ font-size:9px; }
-                .notif-head{ font-size:14.5px; }
-                .notif-group-label{ font-size:10px; }
-                .notif-row-title{ font-size:11.5px; }
-                .tab{ font-size:11.5px; }
-                .tab-badge{ font-size:9.5px; }
-                .month-nav-label{ font-size:14.5px; }
-                .month-nav .icon-btn{ font-size:18px; }
-                .search-clear{ font-size:11.5px; }
-                .overdue-banner{ font-size:11px; }
-                .list-count{ font-size:11px; }
-                .seg button{ font-size:11.5px; }
-                .stage-head{ font-size:11.5px; }
-                .stage-count{ font-size:11px; }
-                .empty{ font-size:11.5px; }
-                .org{ font-size:13px; }
-                .fee{ font-size:11px; }
-                .rail-pct{ font-size:10px; }
-                .pill{ font-size:10px; }
-                .update-badge{ font-size:10px; }
-                .referral-badge{ font-size:10px; }
-                .flag{ font-size:10px; }
-                .reminder-action{ font-size:11.5px; }
-                .fab{ font-size:12.5px; }
-                .section-intro{ font-size:11.5px; }
-                .sheet-head h3{ font-size:16px; }
-                .icon-btn{ font-size:14.5px; }
-                .field{ font-size:11px; }
-                .suggest-dropdown-row{ font-size:12px; }
-                .mic-btn{ font-size:13.5px; }
-                .voice-error{ font-size:11px; }
-                .save-error{ font-size:11px; }
-                .voice-fill-trigger{ font-size:12px; }
-                .collapsible-head{ font-size:12px; }
-                .collapsible-caret{ font-size:12.5px; }
-                .watchlist-head{ font-size:12px; }
-                .watchlist-count{ font-size:9.5px; }
-                .watchlist-note{ font-size:11px; }
-                .watchlist-checkback-field{ font-size:10.5px; }
-                .watchlist-checkback{ font-size:10px; }
-                .contact-link{ font-size:11px; }
-                .cost-row-label{ font-size:11px; }
-                .settings-menu-label{ font-size:12.5px; }
-                .settings-menu-desc{ font-size:10.5px; }
-                .settings-menu-caret{ font-size:16px; }
-                .cal-weekday-row{ font-size:9.5px; }
-                .cal-cell-num{ font-size:11px; }
-                .cal-cell-count{ font-size:8px; }
-                .active-filter-chip{ font-size:11px; }
-                .active-filter-chip button{ font-size:10.5px; }
-                .voice-panel-step{ font-size:10px; }
-                .voice-panel-label{ font-size:15.5px; }
-                .voice-panel .mic-btn{ font-size:15.5px; }
-                .btn{ font-size:12.5px; }
-                .confirm-inline-text{ font-size:10px; }
-                .tag-chip{ font-size:11px; }
-                .stat-value{ font-size:18px; }
-                .stat-label{ font-size:10.5px; }
-                .insight-card h4{ font-size:13.5px; }
-                .insight-note{ font-size:10.5px; }
-                .legend-row{ font-size:10.5px; }
-                .rank-row{ font-size:11.5px; }
-                .rank-num{ font-size:9.5px; }
-                .rank-num-name{ font-size:11px; }
-                .rank-sub{ font-size:9.5px; }
-                .rank-value{ font-size:11px; }
-                .corr-label{ font-size:11.5px; }
-                .corr-bar-tag{ font-size:9.5px; }
-                .corr-bar-value{ font-size:10.5px; }
-                .funnel-label{ font-size:10.5px; }
-                .funnel-count{ font-size:11px; }
-                .partner-row{ font-size:11px; }
-                .partner-head{ font-size:10px; }
-                .vault-head{ font-size:12px; }
-                .vault-item{ font-size:11px; }
-                .score-row-top{ font-size:11.5px; }
-                .score-verdict{ font-size:11px; }
-                .note-text{ font-size:11.5px; }
-                .mini-btn{ font-size:10.5px; }
-                .mini-tag{ font-size:10px; }
-                .existing-client-tag{ font-size:11px; }
-                .existing-client-stats{ font-size:11px; }
-                .suggest-row{ font-size:12px; }
-                .history-stage{ font-size:11.5px; }
-                .history-meta{ font-size:10.5px; }
-                .activity-top{ font-size:11.5px; }
-                .chip-btn{ font-size:11px; }
-      }
     `}</style>
   );
 }
