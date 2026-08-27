@@ -2662,6 +2662,11 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
   // a compact summary — Last contact/Next action/Notes stay live below, since that's what actually
   // gets touched on a check-in. New clients have nothing to summarize yet, so start expanded.
   const [editingDetails, setEditingDetails] = useState(!item);
+  // A retainer that's already configured collapses into a compact summary too — once set,
+  // there's no reason three input fields should permanently occupy the form every time it's
+  // opened. Starts expanded only for a client with no retainer configured yet (nothing to
+  // collapse), or a brand-new client.
+  const [editingRetainer, setEditingRetainer] = useState(!item || !item.hasRetainer);
   const owner = partners.find((p) => p.id === f.responsiblePartner);
 
   return (
@@ -2672,76 +2677,6 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
-          {item && (
-            <button type="button" className="chip-btn" style={{ alignSelf: "flex-start" }} onClick={() => onLogNewWork(f.name)}>
-              + Log new work for {f.name || "this client"}
-            </button>
-          )}
-          <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={f.hasRetainer}
-              onChange={(e) => setF({ ...f, hasRetainer: e.target.checked })}
-              style={{ width: 16, height: 16, accentColor: "var(--navy)" }}
-            />
-            <span>This is a retainer client</span>
-          </label>
-          {f.hasRetainer && (
-            <>
-              {permissions.seeAmounts ? (
-                <div className="row2">
-                  <Field label="Retainer amount (KES)">
-                    <input type="number" value={f.retainerAmount} onChange={set("retainerAmount")} placeholder="150000" />
-                  </Field>
-                  <Field label="Frequency">
-                    <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
-                      <option value="Monthly">Monthly</option>
-                      <option value="Annual">Annual</option>
-                    </select>
-                  </Field>
-                </div>
-              ) : (
-                <Field label="Frequency">
-                  <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
-                    <option value="Monthly">Monthly</option>
-                    <option value="Annual">Annual</option>
-                  </select>
-                </Field>
-              )}
-              <Field label="Renewal date">
-                <input type="date" value={f.retainerRenewalDate} onChange={set("retainerRenewalDate")} />
-                <DayLoadNote getDayLoad={getDayLoad} date={f.retainerRenewalDate} excludeId={f.id} />
-              </Field>
-            </>
-          )}
-          {item && cv && cv.matterCount > 0 && canSeeClientValue && (
-            <section className="client-value-block">
-              <div className="vault-head">
-                <span>Client value</span>
-                <span className="stat-label">Every matter logged under this name</span>
-              </div>
-              <div className="stat-grid" style={{ marginBottom: 0 }}>
-                {permissions.seeMetrics && (
-                  <div className="stat">
-                    <span className="stat-value">{cv.matterCount}</span>
-                    <span className="stat-label">Matters total{cv.wonCount ? ` (${cv.wonCount} won)` : ""}</span>
-                  </div>
-                )}
-                {permissions.seeAmounts && (
-                  <div className="stat">
-                    <span className="stat-value">{fmtKES(cv.wonValue)}</span>
-                    <span className="stat-label">Won across all matters</span>
-                  </div>
-                )}
-                {permissions.seeAmounts && cv.pipelineValue > 0 && (
-                  <div className="stat">
-                    <span className="stat-value">{fmtKES(cv.pipelineValue)}</span>
-                    <span className="stat-label">Still in live pipeline</span>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
           {voiceSupported && (
             voiceFillOpen ? (
               <VoiceFillPanel fields={CLIENT_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
@@ -2839,6 +2774,96 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
               )}
               {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
             </>
+          )}
+          {item && (
+            <button type="button" className="chip-btn" style={{ alignSelf: "flex-start" }} onClick={() => onLogNewWork(f.name)}>
+              + Log new work for {f.name || "this client"}
+            </button>
+          )}
+          {!f.hasRetainer ? (
+            <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={f.hasRetainer}
+                onChange={(e) => { setF({ ...f, hasRetainer: e.target.checked }); setEditingRetainer(true); }}
+                style={{ width: 16, height: 16, accentColor: "var(--navy)" }}
+              />
+              <span>This is a retainer client</span>
+            </label>
+          ) : !editingRetainer ? (
+            <div className="record-summary">
+              <div className="record-summary-top">
+                <span className="org" style={{ fontSize: 14.5 }}>
+                  Retainer{permissions.seeAmounts && f.retainerAmount ? ` — ${fmtKES(f.retainerAmount)}/${f.retainerFrequency === "Annual" ? "yr" : "mo"}` : ""}
+                </span>
+                <button type="button" className="mini-btn" onClick={() => setEditingRetainer(true)}>✏️ Edit</button>
+              </div>
+              {f.retainerRenewalDate && <p className="reminder-action muted-line">Renews {f.retainerRenewalDate}</p>}
+            </div>
+          ) : (
+            <>
+              <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <input
+                  type="checkbox"
+                  checked={f.hasRetainer}
+                  onChange={(e) => setF({ ...f, hasRetainer: e.target.checked })}
+                  style={{ width: 16, height: 16, accentColor: "var(--navy)" }}
+                />
+                <span>This is a retainer client</span>
+              </label>
+              {permissions.seeAmounts ? (
+                <div className="row2">
+                  <Field label="Retainer amount (KES)">
+                    <input type="number" value={f.retainerAmount} onChange={set("retainerAmount")} placeholder="150000" />
+                  </Field>
+                  <Field label="Frequency">
+                    <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
+                      <option value="Monthly">Monthly</option>
+                      <option value="Annual">Annual</option>
+                    </select>
+                  </Field>
+                </div>
+              ) : (
+                <Field label="Frequency">
+                  <select value={f.retainerFrequency} onChange={set("retainerFrequency")}>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Annual">Annual</option>
+                  </select>
+                </Field>
+              )}
+              <Field label="Renewal date">
+                <input type="date" value={f.retainerRenewalDate} onChange={set("retainerRenewalDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.retainerRenewalDate} excludeId={f.id} />
+              </Field>
+            </>
+          )}
+          {item && cv && cv.matterCount > 0 && canSeeClientValue && (
+            <section className="client-value-block">
+              <div className="vault-head">
+                <span>Client value</span>
+                <span className="stat-label">Every matter logged under this name</span>
+              </div>
+              <div className="stat-grid" style={{ marginBottom: 0 }}>
+                {permissions.seeMetrics && (
+                  <div className="stat">
+                    <span className="stat-value">{cv.matterCount}</span>
+                    <span className="stat-label">Matters total{cv.wonCount ? ` (${cv.wonCount} won)` : ""}</span>
+                  </div>
+                )}
+                {permissions.seeAmounts && (
+                  <div className="stat">
+                    <span className="stat-value">{fmtKES(cv.wonValue)}</span>
+                    <span className="stat-label">Won across all matters</span>
+                  </div>
+                )}
+                {permissions.seeAmounts && cv.pipelineValue > 0 && (
+                  <div className="stat">
+                    <span className="stat-value">{fmtKES(cv.pipelineValue)}</span>
+                    <span className="stat-label">Still in live pipeline</span>
+                  </div>
+                )}
+              </div>
+            </section>
           )}
           <Field label="Last contact">
             <input type="date" value={f.lastContact} onChange={set("lastContact")} />
