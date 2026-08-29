@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { supabase } from "./lib/supabaseClient";
 
 /* ------------------------------------------------------------------ *
- *  BIDI REVENUE ENGINE — shared BD pipeline for KKN Law LLP partners
+ *  Bideey — shared BD pipeline for law-firm teams
  *  Data model (all shared=true so every partner sees the same board):
  *    "kkn-partners"      -> [{id,name,identity}]
  *    "kkn-prospects"     -> [{...}]
@@ -4127,14 +4127,14 @@ export default function App({ activeFirm, onSignOut }) {
   );
 
   useEffect(() => {
-    document.title = "Bidi Revenue Engine";
+    document.title = "Bideey";
   }, []);
 
   if (!store.ready) {
     return (
       <div className="boot">
         <Style />
-        <img src={BIDI_LOGO} alt="Bidi" className="boot-mark" />
+        <img src={BIDI_LOGO} alt="Bideey" className="boot-mark" />
         <p>Loading the pipeline…</p>
       </div>
     );
@@ -4144,8 +4144,8 @@ export default function App({ activeFirm, onSignOut }) {
     return (
       <div className="boot">
         <Style />
-        <img src={BIDI_LOGO} alt="Bidi" className="boot-mark" />
-        <h1>Revenue Engine</h1>
+        <img src={BIDI_LOGO} alt="Bideey" className="boot-mark" />
+        <h1>Bideey</h1>
         <p className="muted">Who's picking this up?</p>
         <div className="who-list">
           {store.partners.map((p) => (
@@ -4205,9 +4205,9 @@ export default function App({ activeFirm, onSignOut }) {
       <Style />
       <header className="topbar">
         <button className="brand" onClick={() => setTab("reminders")} aria-label="Go to home">
-          <img src={BIDI_LOGO} alt="Bidi" className="brand-icon" />
-          <span className="brand-mark">Bidi</span>
-          <span className="brand-sub">{activeFirm?.name || "Revenue Engine"}</span>
+          <img src={BIDI_LOGO} alt="Bideey" className="brand-icon" />
+          <span className="brand-mark">Bideey</span>
+          <span className="brand-sub">{activeFirm?.name || "Firm workspace"}</span>
         </button>
         <div className="header-right">
           {feed.total > 0 && (

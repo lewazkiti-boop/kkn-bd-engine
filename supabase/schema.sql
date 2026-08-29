@@ -1,4 +1,4 @@
--- Bidi Revenue Engine - multitenant Supabase schema
+-- Bideey - multitenant Supabase schema
 -- Run this in Supabase SQL Editor. It creates firm-scoped storage with RLS so
 -- authenticated users can only read/write data for firms they belong to.
 

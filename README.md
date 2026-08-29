@@ -1,8 +1,8 @@
-# Bidi Revenue Engine
+# Bideey
 
-Shared business-development pipeline board for law-firm teams — prospects, referrals, tenders, clients, activity tracking, a monthly scorecard, and firm-wide Insights. Ported from a Claude artifact into a standalone Vite + React app, backed by Supabase instead of the artifact-only `window.storage` API.
+Bideey is a shared business-development workspace for law-firm teams — prospects, referrals, tenders, clients, activity tracking, a monthly scorecard, and firm-wide Insights. It runs as a standalone Vite + React app backed by Supabase.
 
-This is the "Bidi" rebrand of the original KKN Revenue Engine artifact, adding: a notification bell with an unseen-updates feed, an Insights tab (firm-wide and by-partner analytics with charts, powered by `recharts`), a private per-partner Watchlist, client types, a Reminders calendar view, referral-attribution tracking ("🤝 X referred"), contact quick-actions (call/email), and a built-in sample-data generator.
+The app now supports invite-only firm workspaces so each firm sees only its own pipeline, clients, referrals, tenders, activity, and settings. It also includes a notification bell with an unseen-updates feed, an Insights tab (firm-wide and by-partner analytics with charts, powered by `recharts`), a private per-partner Watchlist, client types, a Reminders calendar view, referral-attribution tracking ("🤝 X referred"), contact quick-actions (call/email), and a built-in sample-data generator.
 
 ## 1. Set up Supabase
 
@@ -54,7 +54,7 @@ Users sign in with a Supabase magic link before they can see their firm's worksp
 
 1. In Supabase: **Authentication → Providers → Email**. Make sure Email is enabled. "Confirm email" can stay on or off — it doesn't affect magic links either way.
 2. Still in Authentication, go to **URL Configuration** and set:
-   - **Site URL**: your deployed app's URL (e.g. `https://kkn-bd-engine.vercel.app`). While testing locally, you can temporarily set this to `http://localhost:5173` instead, then switch it back once deployed.
+   - **Site URL**: your deployed app's URL (e.g. `https://app.bideey.com`). While testing locally, you can temporarily set this to `http://localhost:5173` instead, then switch it back once deployed.
    - **Redirect URLs**: add both `http://localhost:5173` (local dev) and your production URL, so the login link works from either.
 3. That's it for authentication. `supabase/schema.sql` enforces the real access boundary: signed-in users can only read or write `firm_kv` rows for firms where they have a `firm_members` record.
 
@@ -70,6 +70,10 @@ Users sign in with a Supabase magic link before they can see their firm's worksp
 4. Deploy, then go back to Supabase's **Authentication → URL Configuration** and make sure the Vercel URL is set as the Site URL / in Redirect URLs (see step 4 above) — otherwise magic links will redirect to the wrong place.
 5. Share the resulting URL with the partners.
 
+## 6. Landing page
+
+The static marketing site lives in [`landing/`](./landing/). It is plain HTML, CSS, and JavaScript so it can be copied into cPanel hosting for `bideey.com` while the app itself continues to run separately at `app.bideey.com`.
+
 ## How storage works
 
 The original artifact persisted data through `window.storage.get()` / `window.storage.set()`, an API that only exists inside Claude's artifact sandbox. `src/lib/storagePolyfill.js` re-implements that exact interface, so the rest of the app (`src/App.jsx`, unchanged from the artifact source) keeps working without modification — with one important distinction the artifact itself relies on:
@@ -81,7 +85,7 @@ The original artifact persisted data through `window.storage.get()` / `window.st
 
 `src/Login.jsx` is a simple email field that calls Supabase's `signInWithOtp`, which emails the user a one-tap magic link — no password to create or remember. Invite links keep their `?invite=...` token through that magic-link round trip. `src/lib/AuthGate.jsx` wraps the whole app: it checks for an existing Supabase session on load, accepts any invite token, fetches the user's single firm membership, configures storage with that firm, and renders only that firm's workspace. The `firm_kv` table's row-level-security policy only allows access to rows for that firm, so this isn't just a UI gate — signed-out users and users from other firms cannot read or write the workspace data directly.
 
-## What's new vs. the original KKN Revenue Engine
+## What's included
 
 - **Notification bell** — a combined feed of everything with unseen activity across prospects, clients, referrals, and tenders, plus scorecard activity types.
 - **Insights tab** — firm-wide and by-partner analytics (including a "compare all partners" leaderboard), all-time or by-month, with bar charts via `recharts`.

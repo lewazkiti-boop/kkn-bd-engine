@@ -90,7 +90,7 @@ export default function AuthGate({ children }) {
   if (session === undefined) {
     return (
       <div className="boot">
-        <div className="boot-mark">Bidi</div>
+        <div className="boot-mark">Bideey</div>
         <p>Checking your session…</p>
       </div>
     );
@@ -103,7 +103,7 @@ export default function AuthGate({ children }) {
   if (memberships === undefined) {
     return (
       <div className="boot">
-        <div className="boot-mark">Bidi</div>
+        <div className="boot-mark">Bideey</div>
         <p>Loading your workspace…</p>
       </div>
     );
@@ -112,8 +112,8 @@ export default function AuthGate({ children }) {
   if (error || memberships.length === 0) {
     return (
       <div className="boot">
-        <div className="boot-mark">Bidi</div>
-        <h1>Revenue Engine</h1>
+        <div className="boot-mark">Bideey</div>
+        <h1>Bideey</h1>
         {memberships.length === 0 ? (
           <RegisterFirm onCreated={() => setRefreshKey((n) => n + 1)} />
         ) : (
@@ -131,8 +131,8 @@ export default function AuthGate({ children }) {
   if (memberships.length > 1) {
     return (
       <div className="boot">
-        <div className="boot-mark">Bidi</div>
-        <h1>Revenue Engine</h1>
+        <div className="boot-mark">Bideey</div>
+        <h1>Bideey</h1>
         <p className="muted">Your account has more than one workspace.</p>
         <p className="fine">This app is configured for one firm per user. Ask an administrator to keep only the correct firm membership.</p>
         <button className="link-btn" onClick={signOut}>Sign out</button>

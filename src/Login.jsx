@@ -28,8 +28,8 @@ export default function Login() {
 
   return (
     <div className="boot">
-      <div className="boot-mark">Bidi</div>
-      <h1>Revenue Engine</h1>
+      <div className="boot-mark">Bideey</div>
+      <h1>Bideey</h1>
       {status === "sent" ? (
         <>
           <p className="muted">Check your email</p>
