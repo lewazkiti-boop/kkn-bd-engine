@@ -11,7 +11,14 @@ createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Style />
     <AuthGate>
-      {({ signOut }) => <App onSignOut={signOut} />}
+      {({ session, activeFirm, membershipRole, signOut }) => (
+        <App
+          session={session}
+          activeFirm={activeFirm}
+          membershipRole={membershipRole}
+          onSignOut={signOut}
+        />
+      )}
     </AuthGate>
   </StrictMode>,
 )

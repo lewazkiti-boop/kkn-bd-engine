@@ -16,7 +16,7 @@ export default function Login() {
     setError("");
     const { error: err } = await supabase.auth.signInWithOtp({
       email: trimmed,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: window.location.href },
     });
     if (err) {
       setStatus("error");
@@ -28,7 +28,7 @@ export default function Login() {
 
   return (
     <div className="boot">
-      <div className="boot-mark">KKN</div>
+      <div className="boot-mark">Bidi</div>
       <h1>Revenue Engine</h1>
       {status === "sent" ? (
         <>
@@ -40,11 +40,11 @@ export default function Login() {
         </>
       ) : (
         <>
-          <p className="muted">Sign in to the shared pipeline board</p>
+          <p className="muted">Sign in to your firm's workspace</p>
           <form className="add-partner" onSubmit={submit} style={{ marginTop: 8 }}>
             <input
               type="email"
-              placeholder="you@kknlaw.com"
+              placeholder="you@yourfirm.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoFocus

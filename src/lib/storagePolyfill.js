@@ -5,23 +5,38 @@ import { supabase } from "./supabaseClient";
  * (window.storage.get(key, shared) / window.storage.set(key, value, shared))
  * that the app's useStorage() hook was written against.
  *
- * shared=true (or omitted)  -> Supabase `kkn_kv` table, one row per key.
- *   Every partner shares the same Supabase project/table, so these saves are
- *   visible to every partner on their next load (or next save round-trip).
- *   See supabase/schema.sql for the table + policy definitions.
+ * shared=true (or omitted)  -> Supabase `firm_kv` table, one row per
+ *   firm/key pair. Supabase row-level security only exposes rows for firms the
+ *   current authenticated user belongs to.
  *
- * shared=false -> browser localStorage, namespaced under `kkn-local:`.
+ * shared=false -> browser localStorage, namespaced by firm and user.
  *   Used for per-device/private data (seen-state maps, the personal
  *   Watchlist) that should never sync across partners or devices — matches
  *   the artifact's original per-browser-storage behavior for these keys.
  */
 
 const LOCAL_PREFIX = "kkn-local:";
+let activeFirmId = null;
+let activeUserId = null;
+
+export function configureStorageContext({ firmId, userId } = {}) {
+  activeFirmId = firmId || null;
+  activeUserId = userId || null;
+}
+
+const localKey = (key) => `${LOCAL_PREFIX}${activeFirmId || "no-firm"}:${activeUserId || "anonymous"}:${key}`;
+
+function requireFirm() {
+  if (!activeFirmId) {
+    throw new Error("No active firm selected for shared storage.");
+  }
+  return activeFirmId;
+}
 
 async function get(key, shared = true) {
   if (!shared) {
     try {
-      const raw = window.localStorage.getItem(LOCAL_PREFIX + key);
+      const raw = window.localStorage.getItem(localKey(key));
       return raw === null ? null : { value: raw };
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -30,9 +45,11 @@ async function get(key, shared = true) {
     }
   }
 
+  const firmId = requireFirm();
   const { data, error } = await supabase
-    .from("kkn_kv")
+    .from("firm_kv")
     .select("value")
+    .eq("firm_id", firmId)
     .eq("key", key)
     .maybeSingle();
 
@@ -51,7 +68,7 @@ async function get(key, shared = true) {
 async function set(key, value, shared = true) {
   if (!shared) {
     try {
-      window.localStorage.setItem(LOCAL_PREFIX + key, value);
+      window.localStorage.setItem(localKey(key), value);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error(`[storage] local set(${key}) failed:`, e.message);
@@ -60,10 +77,11 @@ async function set(key, value, shared = true) {
     return;
   }
 
+  const firmId = requireFirm();
   const parsed = JSON.parse(value);
   const { error } = await supabase
-    .from("kkn_kv")
-    .upsert({ key, value: parsed, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    .from("firm_kv")
+    .upsert({ firm_id: firmId, key, value: parsed, updated_at: new Date().toISOString() }, { onConflict: "firm_id,key" });
 
   if (error) {
     // eslint-disable-next-line no-console
