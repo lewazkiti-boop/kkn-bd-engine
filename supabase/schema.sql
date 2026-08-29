@@ -296,7 +296,7 @@ on conflict (id) do update
 set name = excluded.name,
     slug = excluded.slug;
 
--- If the old single-tenant table exists, copy its rows into the KKN firm.
+-- If the old single-tenant table exists, copy its rows into the KKN Law LLP firm.
 do $$
 begin
   if to_regclass('public.kkn_kv') is not null then
@@ -380,8 +380,8 @@ values (
 )
 on conflict (firm_id, key) do nothing;
 
--- Existing users are not auto-joined by domain. Add the first KKN owner
--- manually, then let that owner create invite links from the app. Example:
+-- Existing users are not auto-joined by domain. Add the first KKN Law LLP
+-- owner manually, then let that owner create invite links from the app. Example:
 --
 -- insert into firm_members (firm_id, user_id, role)
 -- select 'kkn', id, 'owner'

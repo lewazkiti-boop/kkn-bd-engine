@@ -7,7 +7,7 @@ The app now supports invite-only firm workspaces so each firm sees only its own 
 ## 1. Set up Supabase
 
 1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
-2. Open **SQL Editor → New query**, paste in the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the multitenant `firms`, `firm_members`, `firm_invites`, and `firm_kv` tables, adds row-level-security policies, migrates any old `kkn_kv` rows into the seeded KKN firm, and seeds the original KKN starter records when needed.
+2. Open **SQL Editor → New query**, paste in the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it. This creates the multitenant `firms`, `firm_members`, `firm_invites`, and `firm_kv` tables, adds row-level-security policies, migrates any old legacy rows into the seeded KKN Law LLP firm, and seeds starter records when needed.
 3. Go to **Project Settings → API** and copy the **Project URL** and the **anon / public** key.
 
 ### Adding a firm
@@ -16,7 +16,7 @@ The first user for a firm signs in and creates that firm's workspace in the app.
 
 A user can belong to one firm only. The database enforces this with a unique membership constraint, so the app never needs to ask users which firm to open.
 
-If you are migrating the original seeded KKN workspace, let the first KKN owner sign in once, then run this once in Supabase SQL Editor so they can access the migrated KKN data and create invite links:
+If you are migrating the original seeded KKN Law LLP workspace, let the first KKN owner sign in once, then run this once in Supabase SQL Editor so they can access the migrated data and create invite links:
 
 ```sql
 insert into firm_members (firm_id, user_id, role)
@@ -78,7 +78,7 @@ The static marketing site lives in [`landing/`](./landing/). It is plain HTML, C
 
 The original artifact persisted data through `window.storage.get()` / `window.storage.set()`, an API that only exists inside Claude's artifact sandbox. `src/lib/storagePolyfill.js` re-implements that exact interface, so the rest of the app (`src/App.jsx`, unchanged from the artifact source) keeps working without modification — with one important distinction the artifact itself relies on:
 
-- **Shared firm data** (`shared=true`, the default) — `kkn-partners`, `kkn-prospects`, `kkn-referrals`, `kkn-activity`, `kkn-tenders`, `kkn-tender-vault`, `kkn-clients`, and firm settings — is stored in Supabase `firm_kv` rows keyed by `(firm_id, key)`. Row-level security checks the logged-in user's `firm_members` row before every read or write, so users from one firm cannot access another firm's data even by calling Supabase directly.
+- **Shared firm data** (`shared=true`, the default) — partners, prospects, referrals, activity, tenders, clients, and firm settings — is stored in Supabase `firm_kv` rows keyed by `(firm_id, key)`. Row-level security checks the logged-in user's `firm_members` row before every read or write, so users from one firm cannot access another firm's data even by calling Supabase directly.
 - **Private, per-device data** (`shared=false`) — `seen-prospects`, `seen-clients`, `seen-referrals`, `seen-tenders`, `seen-activity-types` (which power the notification-bell "unseen" badges) and `watchlist` (the private per-partner Watchlist) — is stored in the browser's own `localStorage`, namespaced by firm and user. This never syncs to Supabase or to other partners/devices, matching the artifact's intent that this data stay personal. A practical consequence: a partner's watchlist and "seen" state are tied to one browser — they won't follow that partner to a different device.
 
 ## How sign-in works
