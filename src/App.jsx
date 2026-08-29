@@ -4203,8 +4203,11 @@ export default function App({ activeFirm, onSignOut }) {
         <button className="brand" onClick={() => setTab("reminders")} aria-label="Go to home">
           <span className="brand-icon brand-letter" aria-hidden="true">B</span>
           <span className="brand-mark">Bideey</span>
-          <span className="brand-sub">{activeFirmName || "Firm workspace"}</span>
         </button>
+        <div className="workspace-title" aria-label="Current firm workspace">
+          <span>Workspace</span>
+          <strong>{activeFirmName || "Firm workspace"}</strong>
+        </div>
         <div className="header-right">
           {feed.total > 0 && (
             <button className="notif-bell" onClick={() => setNotifOpen(true)} aria-label="View updates">
@@ -6200,12 +6203,14 @@ export function Style() {
       .role-help-text{ display:block; font-size:11px; color:var(--muted); font-weight:500; margin-top:2px; }
       .fine{ font-size:11.5px; color:var(--muted); margin-top:18px; }
 
-      .topbar{ position:sticky; top:0; z-index:5; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:space-between; padding:14px 16px; }
+      .topbar{ position:sticky; top:0; z-index:5; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; }
       .brand{ display:flex; align-items:center; gap:8px; background:none; border:none; padding:0; cursor:pointer; text-align:left; }
-      .brand-icon{ width:22px; height:22px; display:grid; place-items:center; }
-      .brand-letter{ border-radius:999px; background:linear-gradient(135deg,var(--gold),var(--gold-2)); color:var(--ink); font-family:'Playfair Display',serif; font-size:13px; font-weight:900; line-height:1; }
-      .brand-mark{ font-family:'Playfair Display',serif; font-weight:700; letter-spacing:0.1em; color:var(--gold-2); }
-      .brand-sub{ font-size:12.5px; opacity:0.85; }
+      .brand-icon{ width:28px; height:28px; display:grid; place-items:center; }
+      .brand-letter{ border-radius:9px; background:linear-gradient(135deg,var(--gold),var(--gold-2)); color:var(--ink); font-family:'Playfair Display',serif; font-size:16px; font-weight:900; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,0.18); }
+      .brand-mark{ font-family:'Playfair Display',serif; font-size:18px; font-weight:800; letter-spacing:0.08em; color:var(--gold-2); text-transform:uppercase; }
+      .workspace-title{ min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; padding-left:10px; border-left:1px solid rgba(255,255,255,0.18); }
+      .workspace-title span{ font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:rgba(255,255,255,0.62); }
+      .workspace-title strong{ font-size:13px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
       .me-chip{ background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; border-radius:999px; padding:6px 12px; font-size:12.5px; }
       .header-right{ display:flex; align-items:center; gap:10px; }
       .notif-bell{ position:relative; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; border-radius:999px; padding:6px 10px; font-size:14px; display:inline-flex; align-items:center; }
