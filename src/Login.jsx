@@ -28,7 +28,7 @@ export default function Login() {
 
   return (
     <div className="boot">
-      <div className="boot-mark">Bideey</div>
+      <div className="boot-mark" aria-hidden="true">B</div>
       <h1>Bideey</h1>
       {status === "sent" ? (
         <>

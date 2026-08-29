@@ -65,7 +65,7 @@ const DEFAULT_PARTNERS = [
 // figures out of the screens someone doesn't need, without pretending to be adversarial security.
 // Adding a new access level later (e.g. a partial-access admin) is just a new key here — nothing
 // else in the app needs to change, since every gate below checks a permission flag, not a role name.
-const ROLE_LABELS = { partner: "Partner", admin: "Admin (restricted)" };
+const ROLE_LABELS = { partner: "Partner", admin: "Admin / BD user" };
 const ROLE_HELP = {
   partner: "Full access — pipeline, tenders, clients, referrals, Scorecard, and Insights.",
   admin: "Adds and updates records — clients, tenders, prospects, referrals — without seeing money, performance figures, or partner-by-partner views. Can't filter by partner either.",
@@ -4130,7 +4130,7 @@ export default function App({ activeFirm, onSignOut }) {
     return (
       <div className="boot">
         <Style />
-        <div className="boot-mark boot-wordmark">Bideey</div>
+        <div className="boot-mark" aria-hidden="true">B</div>
         <p>Loading the pipeline…</p>
       </div>
     );
@@ -4140,7 +4140,7 @@ export default function App({ activeFirm, onSignOut }) {
     return (
       <div className="boot">
         <Style />
-        <div className="boot-mark boot-wordmark">Bideey</div>
+        <div className="boot-mark" aria-hidden="true">B</div>
         <h1>Bideey</h1>
         <p className="muted">Who's picking this up?</p>
         <div className="who-list">
@@ -5050,7 +5050,7 @@ function AddPartner({ onAdd }) {
   const [identity, setIdentity] = useState("");
   const [role, setRole] = useState("partner");
   if (!open) {
-    return <button className="link-btn" onClick={() => setOpen(true)}>+ Add a partner or admin not listed</button>;
+    return <button className="link-btn" onClick={() => setOpen(true)}>+ Add a partner or admin / BD user not listed</button>;
   }
   return (
     <div className="add-partner">
@@ -5067,7 +5067,7 @@ function AddPartner({ onAdd }) {
           setName(""); setIdentity(""); setRole("partner"); setOpen(false);
         }}
       >
-        Add {role === "admin" ? "admin" : "partner"}
+        Add {role === "admin" ? "admin / BD user" : "partner"}
       </button>
     </div>
   );
@@ -6183,8 +6183,7 @@ export function Style() {
         min-height:100vh; max-width:560px; margin:0 auto; position:relative; overflow-x:hidden;
       }
       .boot{ display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 24px; text-align:center; gap:10px;}
-      .boot-mark{ display:block; margin:0 auto 6px; }
-      .boot-wordmark{ width:auto; height:auto; color:var(--gold-2); font-family:'Playfair Display',serif; font-size:28px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; }
+      .boot-mark{ width:46px; height:46px; display:grid; place-items:center; margin:0 auto 6px; border-radius:14px; background:linear-gradient(135deg,var(--gold),var(--gold-2)); color:var(--ink); font-family:'Playfair Display',serif; font-size:25px; font-weight:900; line-height:1; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
       .boot h1{ font-family:'Playfair Display',serif; font-size:26px; margin:6px 0 0; }
       .muted{ color:var(--muted); margin:0; }
       .who-list{ display:flex; flex-direction:column; gap:10px; width:100%; margin-top:8px; }
