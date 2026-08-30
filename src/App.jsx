@@ -3864,7 +3864,7 @@ function TeamRolesPage({ store }) {
 // Settings — a menu of bespoke, firm-wide items. The pattern is meant to grow, so each item is its
 // own page rather than everything living flat on one screen.
 const SETTINGS_PAGES = [
-  { key: "access", label: "Firm Access", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
+  { key: "access", label: "Invite your people", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
   { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs restricted admin access", Component: TeamRolesPage, partnerOnly: true },
   { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true },
   { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage, requiresAmounts: true },
@@ -3919,7 +3919,7 @@ function FirmAccessPage({ activeFirm }) {
   return (
     <>
       <p className="section-intro">
-        Invite people into {activeFirmName || "this firm"} by link. A user can belong to one firm only, and accepted invites open only this firm's workspace.
+        Invite people into {activeFirmName || "this firm"} workspace by link. A user can belong to one firm only, and accepted invites open only this firm's workspace.
       </p>
       <form className="watchlist-add" onSubmit={createInvite}>
         <Field label="Email address">
@@ -4033,7 +4033,6 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
 
 export default function App({ activeFirm, onSignOut }) {
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
-  const activeFirmName = activeFirm?.name;
   const store = useStorage(activeFirmId);
   // iOS shrinks the *visible* area when the keyboard opens but leaves position:fixed elements
   // sized to the full, unchanged layout viewport — that mismatch is what causes a fixed modal to
@@ -4204,10 +4203,6 @@ export default function App({ activeFirm, onSignOut }) {
           <span className="brand-icon brand-letter" aria-hidden="true">B</span>
           <span className="brand-mark">Bideey</span>
         </button>
-        <div className="workspace-title" aria-label="Current firm workspace">
-          <span>Workspace</span>
-          <strong>{activeFirmName || "Firm workspace"}</strong>
-        </div>
         <div className="header-right">
           {feed.total > 0 && (
             <button className="notif-bell" onClick={() => setNotifOpen(true)} aria-label="View updates">
@@ -4215,10 +4210,10 @@ export default function App({ activeFirm, onSignOut }) {
             </button>
           )}
           <button className="notif-bell" onClick={() => setSettingsOpen(true)} aria-label="Settings">⚙️</button>
-          <button className="me-chip" onClick={() => setMe(null)}>
+          <button className="me-name" onClick={() => setMe(null)}>
             {myPartner?.name || "Switch"}
           </button>
-          <button className="me-chip" onClick={onSignOut}>Sign out</button>
+          <button className="signout-btn" onClick={onSignOut}>Sign out</button>
         </div>
       </header>
 
@@ -5050,7 +5045,7 @@ function AddPartner({ onAdd }) {
   const [identity, setIdentity] = useState("");
   const [role, setRole] = useState("partner");
   if (!open) {
-    return <button className="link-btn" onClick={() => setOpen(true)}>+ Add a partner or admin / BD user not listed</button>;
+    return <button className="add-user-btn" onClick={() => setOpen(true)}>+ Add another user</button>;
   }
   return (
     <div className="add-partner">
@@ -6193,6 +6188,8 @@ export function Style() {
       .who-role-badge{ display:inline-block; margin-left:8px; font-size:10px; font-weight:700; color:var(--amber); background:#FBF1DC; padding:2px 7px; border-radius:999px; vertical-align:middle; }
       .link-btn{ background:none; border:none; color:var(--navy-2); text-decoration:underline; font-size:13px; margin-top:6px; }
       .link-btn-danger{ color:var(--red); }
+      .add-user-btn{ width:100%; margin-top:10px; background:#FBF1DC; border:1px solid #E9D9AE; color:var(--navy); border-radius:8px; padding:11px 14px; font-size:13px; font-weight:800; text-align:center; }
+      .add-user-btn:hover{ background:#F6E7C4; }
       .sample-data-row{ display:flex; gap:16px; justify-content:center; margin-top:10px; }
       .sample-data-confirm{ width:100%; margin-top:10px; background:#FBF1DC; border:1px solid #E9D9AE; border-radius:8px; padding:12px; text-align:left; }
       .sample-data-confirm .fine{ margin:0 0 8px; color:var(--ink); }
@@ -6207,10 +6204,8 @@ export function Style() {
       .brand-icon{ width:28px; height:28px; display:grid; place-items:center; }
       .brand-letter{ border-radius:9px; background:linear-gradient(135deg,var(--gold),var(--gold-2)); color:var(--ink); font-family:'Playfair Display',serif; font-size:16px; font-weight:900; line-height:1; box-shadow:0 4px 14px rgba(0,0,0,0.18); }
       .brand-mark{ font-family:'Playfair Display',serif; font-size:18px; font-weight:800; letter-spacing:0.08em; color:var(--gold-2); text-transform:uppercase; }
-      .workspace-title{ min-width:0; flex:1; display:flex; flex-direction:column; gap:1px; padding-left:10px; border-left:1px solid rgba(255,255,255,0.18); }
-      .workspace-title span{ font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:rgba(255,255,255,0.62); }
-      .workspace-title strong{ font-size:13px; font-weight:700; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-      .me-chip{ background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; border-radius:999px; padding:6px 12px; font-size:12.5px; }
+      .me-name{ background:none; border:none; color:#fff; padding:6px 0; font-size:12.5px; font-weight:700; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .signout-btn{ background:var(--gold); border:1px solid var(--gold); color:var(--ink); border-radius:999px; padding:7px 12px; font-size:12.5px; font-weight:800; }
       .header-right{ display:flex; align-items:center; gap:10px; }
       .notif-bell{ position:relative; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25); color:#fff; border-radius:999px; padding:6px 10px; font-size:14px; display:inline-flex; align-items:center; }
       .notif-count{ position:absolute; top:-5px; right:-6px; background:var(--red); color:#fff; font-size:10px; font-weight:700; border-radius:999px; min-width:16px; height:16px; display:flex; align-items:center; justify-content:center; padding:0 3px; }

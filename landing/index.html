@@ -1,213 +1,683 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="Bideey helps law firms manage business development, referrals, tenders, client relationships, reminders, and firm-wide insights in one private workspace."
-    />
-    <title>Bideey | Business development workspace for law firms</title>
-    <link rel="stylesheet" href="styles.css" />
-  </head>
-  <body>
-    <header class="site-header">
-      <a class="brand" href="#top" aria-label="Bideey home">
-        <span class="brand-mark">B</span>
-        <span>Bideey</span>
-      </a>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bideey — The revenue engine for relationship-led law firms</title>
+<meta name="description" content="Bideey gives African law firms one shared system for prospects, follow-ups, referrals, tenders and the activities that turn relationships into revenue. Currently in private beta.">
 
-      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
-        <span></span>
-        <span></span>
-        <span></span>
-      </button>
+<!-- Open Graph -->
+<meta property="og:title" content="Bideey — The revenue engine for relationship-led law firms">
+<meta property="og:description" content="Business development should not live in partners' heads. One shared rhythm for pipeline, follow-ups, referrals, tenders and clients.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_KE">
 
-      <nav class="site-nav" id="site-nav">
-        <a href="#features">Features</a>
-        <a href="#privacy">Firm privacy</a>
-        <a href="#workflow">Workflow</a>
-        <a href="#contact">Contact</a>
-        <a class="nav-cta" href="https://app.bideey.com">Open app</a>
-      </nav>
-    </header>
+<!-- Structured data: software product -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Bideey",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "description": "A business-development and revenue-coordination platform for African law firms and relationship-led professional-services firms.",
+  "offers": { "@type": "Offer", "availability": "https://schema.org/LimitedAvailability", "category": "Private beta" }
+}
+</script>
 
-    <main id="top">
-      <section class="hero section">
-        <div class="hero-copy">
-          <p class="eyebrow">Private BD workspaces for law firms</p>
-          <h1>Grow firm relationships without losing track of the next move.</h1>
-          <p class="hero-text">
-            Bideey brings prospects, referrals, tenders, clients, reminders, and partner activity into one focused workspace built for legal teams.
-          </p>
-          <div class="hero-actions">
-            <a class="button primary" href="https://app.bideey.com">Go to app</a>
-            <a class="button secondary" href="#features">See what it does</a>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@500;600;700;800;900&family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<!-- Hero image preloaded with high priority; the other four generated images are lazy-loaded where they appear -->
+<link rel="preload" as="image" href="images/generated/bideey-partner-strategy-v2.jpg" fetchpriority="high">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<!-- ============ HEADER ============ -->
+<header class="site">
+  <div class="nav-inner">
+    <a href="#top" class="brand" aria-label="Bideey home">
+      <img src="bideey-logo.png" alt="Bideey logo" width="30" height="30">
+      <span class="brand-word">Bideey</span>
+    </a>
+    <nav class="primary links" aria-label="Primary">
+      <a class="navlink" href="#product">Product</a>
+      <a class="navlink" href="#how-it-works">How it works</a>
+      <a class="navlink" href="#for-law-firms">For law firms</a>
+      <a class="navlink" href="#insights">Insights</a>
+      <a class="navlink" href="#about">About</a>
+    </nav>
+    <div class="nav-cta">
+      <a href="#app-access" class="btn btn-outline btn-sm js-app-access">Access the app</a>
+      <a href="#beta" class="btn btn-gold btn-sm">Request beta access</a>
+    </div>
+    <button class="menu-toggle" id="menuToggle" aria-label="Open menu" aria-expanded="false" aria-controls="mobileMenu">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="#product">Product</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="#for-law-firms">For law firms</a>
+    <a href="#insights">Insights</a>
+    <a href="#about">About</a>
+    <div class="mm-cta">
+      <a href="#app-access" class="btn btn-outline btn-sm js-app-access">Access the app</a>
+      <a href="#beta" class="btn btn-gold btn-sm">Request beta access</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ============ HERO ============ -->
+<section id="top" class="hero">
+  <div class="hero-bg" id="heroBg" role="img" aria-label="Partners reviewing a business-development strategy together around a meeting table"></div>
+  <div class="hero-scrim"></div>
+  <div class="container hero-content">
+    <div class="hero-text">
+      <span class="hero-kicker fx-rise" data-d="0">Relationship-led growth, made visible</span>
+      <h1 class="fx-rise" data-d="1">Business development should not live in partners' heads.</h1>
+      <p class="lede fx-rise" data-d="2">One shared rhythm for prospects, follow-ups, referrals, tenders and clients — and the activities that turn relationships into revenue.</p>
+      <div class="hero-ctas fx-rise" data-d="3">
+        <a href="#beta" class="btn btn-gold">Request beta access</a>
+        <a href="#product" class="btn btn-outline-light">Explore the product</a>
+      </div>
+      <p class="hero-fineprint fx-rise" data-d="4">Built around the way African law firms actually win work.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RELATIONSHIP-LED GROWTH ============ -->
+<section id="relationship-growth" style="padding:0;">
+  <div class="rg-wrap">
+    <div class="rg-panel fx-rise">
+      <span class="eyebrow">Where it starts</span>
+      <h2 style="font-size:clamp(1.5rem,2.4vw,2rem); margin-bottom:14px;">Relationships begin in rooms like this.</h2>
+      <p class="section-lede" style="margin:0;">Bideey makes sure the next action doesn't disappear when the room empties.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE PROBLEM ============ -->
+<section id="product">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">The problem</span>
+      <h2>Doing the work, without seeing the pipeline.</h2>
+    </div>
+    <div class="problem-list reveal">
+      <div class="problem-row"><span class="problem-mark">01</span><p>An introduction lives in one partner's WhatsApp.</p></div>
+      <div class="problem-row"><span class="problem-mark">02</span><p>A proposal stalls — nobody owns the follow-up.</p></div>
+      <div class="problem-row"><span class="problem-mark">03</span><p>Referral relationships go quiet for months.</p></div>
+      <div class="problem-row"><span class="problem-mark">04</span><p>Tender documents get rebuilt from scratch, every time.</p></div>
+      <div class="problem-row"><span class="problem-mark">05</span><p>No one can state the pipeline's real value in a meeting.</p></div>
+    </div>
+    <p class="problem-close reveal">Bideey turns scattered effort into a firm-wide rhythm.</p>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ============ HOW IT WORKS ============ -->
+<section id="how-it-works">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">How Bideey works</span>
+      <h2>Three things, done consistently, every week.</h2>
+    </div>
+    <div class="steps reveal">
+      <div class="step">
+        <span class="step-num">First</span>
+        <h3>Capture what matters</h3>
+        <p>Record prospects, client opportunities, referrals, tenders and the relationship context behind them — without turning business development into an administrative burden.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">Then</span>
+        <h3>Keep the next action visible</h3>
+        <p>Every live opportunity has an owner, a stage, a relationship strength, a next action and a follow-up date. Reminders surface what needs attention before opportunities quietly go cold.</p>
+      </div>
+      <div class="step">
+        <span class="step-num">Over time</span>
+        <h3>Learn what produces revenue</h3>
+        <p>See what is moving, what is stalling, which sources convert, which practices carry opportunity, and whether consistent activity is actually leading to instructions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CAPABILITIES MOSAIC ============ -->
+<section id="capabilities" style="background:var(--white); border-top:1px solid var(--divider); border-bottom:1px solid var(--divider);">
+  <div class="container">
+    <div class="section-head wide reveal">
+      <span class="eyebrow">Product capabilities</span>
+      <h2>Built for what actually generates work.</h2>
+    </div>
+    <div class="mosaic reveal">
+      <div class="cap-card featured cap-lg">
+        <span class="cap-eyebrow">Core</span>
+        <h4>Shared opportunity pipeline</h4>
+        <p>Target through Won or Lost — visible to the whole firm, not one partner's head.</p>
+      </div>
+      <div class="cap-card cap-md">
+        <span class="cap-eyebrow">Daily use</span>
+        <h4>Follow-up reminders</h4>
+        <p>Next actions surface automatically, so nothing goes cold from neglect.</p>
+      </div>
+      <div class="cap-card cap-md">
+        <span class="cap-eyebrow">Growth</span>
+        <h4>Client &amp; repeat-work development</h4>
+        <p>Cross-selling opportunities inside relationships you already have.</p>
+      </div>
+      <div class="cap-card cap-lg">
+        <span class="cap-eyebrow">Relationships</span>
+        <h4>Referral relationship tracking</h4>
+        <p>The people who send you work — with a record of what they've actually produced.</p>
+      </div>
+      <div class="cap-card cap-sm">
+        <span class="cap-eyebrow">Finance</span>
+        <h4>Collections &amp; outstanding fees</h4>
+        <p>Won versus actually collected.</p>
+      </div>
+      <div class="cap-card cap-sm">
+        <span class="cap-eyebrow">Discretion</span>
+        <h4>Private watchlist</h4>
+        <p>Early relationships not yet ready to share firm-wide.</p>
+      </div>
+      <div class="cap-card cap-md">
+        <span class="cap-eyebrow">Network</span>
+        <h4>Resource-people directory</h4>
+        <p>Specialist advisers, kept separate from the revenue pipeline.</p>
+      </div>
+      <div class="cap-card cap-md">
+        <span class="cap-eyebrow">Configuration</span>
+        <h4>Practice areas &amp; targets</h4>
+        <p>Configured to your own practice groups and activity targets.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TENDER & EMPANELMENT ============ -->
+<section id="tenders" class="tight">
+  <div class="container">
+    <div class="tn-wrap">
+      <div class="tn-image fx-scale-in reveal">
+        <picture>
+          <source srcset="images/generated/bideey-tender-collaboration.webp" type="image/webp">
+          <img src="images/generated/bideey-tender-collaboration.jpg" alt="A team reviewing tender documents and a checklist together" loading="lazy" width="1672" height="941">
+        </picture>
+      </div>
+      <div>
+        <span class="eyebrow">Tenders &amp; empanelments</span>
+        <h2 style="font-size:clamp(1.5rem,2.4vw,2rem); margin-bottom:14px;">Coordinate the bid, not just the deadline.</h2>
+        <p class="section-lede" style="margin-bottom:22px;">Every stage owned, from qualification to result.</p>
+        <ul class="tn-checklist" id="tenderChecklist">
+          <li class="fx-rise"><span class="tick">✓</span> Bid / no-bid decision</li>
+          <li class="fx-rise"><span class="tick">✓</span> Mandatory documents</li>
+          <li class="fx-rise"><span class="tick">✓</span> Technical proposal</li>
+          <li class="fx-rise"><span class="tick">✓</span> Financial proposal</li>
+          <li class="fx-rise"><span class="tick">✓</span> Partner review</li>
+          <li class="fx-rise"><span class="tick">✓</span> Submission &amp; follow-up</li>
+          <li class="fx-rise"><span class="tick">✓</span> Result &amp; lessons</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRODUCT WALKTHROUGH ============ -->
+<section id="walkthrough">
+  <div class="container">
+    <div class="section-head reveal">
+      <span class="eyebrow">See it working</span>
+      <h2>A walk through the actual screens.</h2>
+      <p class="section-lede">Every screen below reflects the working application, shown with clearly fictional sample data.</p>
+    </div>
+
+    <div class="walk-wrap reveal">
+      <div class="walk-tabs" role="tablist" aria-label="Product walkthrough">
+        <button class="walk-tab active" data-tab="reminders" role="tab" aria-selected="true">Reminders</button>
+        <button class="walk-tab" data-tab="pipeline" role="tab" aria-selected="false">Pipeline</button>
+        <button class="walk-tab" data-tab="tenders" role="tab" aria-selected="false">Tenders</button>
+        <button class="walk-tab" data-tab="clients" role="tab" aria-selected="false">Clients</button>
+        <button class="walk-tab" data-tab="referrals" role="tab" aria-selected="false">Referrals</button>
+        <button class="walk-tab" data-tab="scorecard" role="tab" aria-selected="false">Scorecard</button>
+        <button class="walk-tab" data-tab="insights" role="tab" aria-selected="false">Insights</button>
+      </div>
+
+      <div class="walk-panels">
+
+        <!-- Reminders -->
+        <div class="walk-panel active" id="panel-reminders">
+          <div class="screen">
+            <div class="screen-bar"><span>Reminders — Due this week</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="row-card">
+                <div><div class="rc-title">Send AI Governance Readiness proposal</div><div class="rc-sub">PesaLink Technologies · Prospect · Owner: A. Ochieng</div></div>
+                <div class="rc-right"><span class="pill pill-burgundy">Due tomorrow</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Coffee to discuss new listings</div><div class="rc-sub">D. Mwangi — Real Estate Agent · Referral partner</div></div>
+                <div class="rc-right"><span class="pill pill-gold">Due in 3 days</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Finalize technical proposal review</div><div class="rc-sub">Nairobi County — Legal Services Panel · Tender</div></div>
+                <div class="rc-right"><span class="pill pill-navy">Due in 7 days</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Quarterly check-in call</div><div class="rc-sub">Savannah Properties Ltd · Client</div></div>
+                <div class="rc-right"><span class="pill pill-navy">Due in 9 days</span></div>
+              </div>
+            </div>
           </div>
-          <p class="trust-note">Invite-only access. Each firm sees only its own workspace.</p>
+          <p class="walk-caption">Every prospect, client, referral partner and tender can carry a next action and a date. Reminders pull them into one weekly list, grouped by urgency — so nothing depends on any one person's memory.</p>
         </div>
 
-        <figure class="hero-image">
-          <img
-            src="assets/business-development-cover.webp"
-            alt="Glowing light bulb surrounded by business development sketches"
-          />
-        </figure>
-      </section>
-
-      <section class="section feature-section" id="features">
-        <div class="section-heading">
-          <p class="eyebrow">What Bideey handles</p>
-          <h2>One place for the work that usually lives in chats, spreadsheets, and memory.</h2>
-          <p class="section-subtitle">Designed for legal teams that need a clearer commercial rhythm.</p>
-        </div>
-
-        <div class="feature-grid">
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <path d="M6 5h12v5H6z" />
-                <path d="M12 10v4" />
-                <path d="M5 19h5v-5H5z" />
-                <path d="M14 19h5v-5h-5z" />
-                <path d="M12 14H7.5" />
-                <path d="M12 14h4.5" />
-              </svg>
-            </span>
-            <h3>Pipeline tracking</h3>
-            <p>Track prospects by stage, responsible partner, practice area, next action, value, and status.</p>
-          </article>
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <circle cx="12" cy="12" r="3.2" />
-                <circle cx="5" cy="6" r="2.2" />
-                <circle cx="19" cy="6" r="2.2" />
-                <circle cx="18" cy="19" r="2.2" />
-                <path d="M7 7.7 9.7 10" />
-                <path d="m14.3 10 2.9-2.3" />
-                <path d="m14 14.3 2.6 3" />
-              </svg>
-            </span>
-            <h3>Referral visibility</h3>
-            <p>Link prospects to the client or referral partner who brought them in, then see what converts.</p>
-          </article>
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <path d="M6 4v3" />
-                <path d="M18 4v3" />
-                <path d="M4.5 9h15" />
-                <path d="M5 6h14v13H5z" />
-                <path d="m9 14 2 2 4-4" />
-              </svg>
-            </span>
-            <h3>Reminders</h3>
-            <p>Keep follow-ups from slipping by turning next actions into a simple calendar view.</p>
-          </article>
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <path d="M4.5 7.5h15v12h-15z" />
-                <path d="M6.5 4.5h11l2 3h-15z" />
-                <path d="M9 12h6" />
-                <path d="M9 15.5h4" />
-              </svg>
-            </span>
-            <h3>Tender vault</h3>
-            <p>Organize tender opportunities, deadlines, notes, and outcomes in the same firm workspace.</p>
-          </article>
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <path d="M7 4.5h7l3 3v12H7z" />
-                <path d="M14 4.5v3h3" />
-                <circle cx="12" cy="11.5" r="2.1" />
-                <path d="M8.8 17c.7-1.8 2-2.7 3.2-2.7s2.5.9 3.2 2.7" />
-              </svg>
-            </span>
-            <h3>Client intelligence</h3>
-            <p>Keep key contacts, client type, relationship notes, and recent activity close to the pipeline.</p>
-          </article>
-          <article class="feature-card">
-            <span class="icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" role="img">
-                <path d="M4 18.5h16" />
-                <path d="M6.5 15.5v-4" />
-                <path d="M11.5 15.5v-8" />
-                <path d="M16.5 15.5v-6" />
-                <path d="m6.5 10 5-4 5 2 3-3" />
-              </svg>
-            </span>
-            <h3>Insights</h3>
-            <p>Review firm-wide and partner-level business-development activity with clear dashboards.</p>
-          </article>
-        </div>
-      </section>
-
-      <section class="section split-section" id="privacy">
-        <div>
-          <p class="eyebrow">Multitenant by design</p>
-          <h2>Every firm gets its own private workspace.</h2>
-          <p>
-            Bideey is built so users do not choose from a public list of firms. The first person creates the firm workspace, then invites colleagues through private links.
-          </p>
-        </div>
-        <div class="privacy-list">
-          <div>
-            <strong>One user, one firm</strong>
-            <span>Accounts are tied to a single firm workspace.</span>
+        <!-- Pipeline -->
+        <div class="walk-panel" id="panel-pipeline">
+          <div class="screen">
+            <div class="screen-bar"><span>Prospect Pipeline</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="stage-rail">
+                <div class="sr-item done"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Target</span></div>
+                <div class="sr-item done"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Contacted</span></div>
+                <div class="sr-item done"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Conversation</span></div>
+                <div class="sr-item active"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Qualified</span></div>
+                <div class="sr-item"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Proposal Req.</span></div>
+                <div class="sr-item"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Proposal Sub.</span></div>
+                <div class="sr-item"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Negotiation</span></div>
+                <div class="sr-item"><span class="sr-line"></span><span class="sr-dot"></span><span class="sr-label">Won</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">PesaLink Technologies — AI governance readiness review</div><div class="rc-sub">Source: Existing client · Fintech · Strength: Strong</div></div>
+                <div class="rc-right">KES 1,800,000<br><span class="pill pill-gold">Qualified</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Coastline Logistics — Commercial contracts review</div><div class="rc-sub">Source: Referral · Logistics · Strength: Warm</div></div>
+                <div class="rc-right">KES 650,000<br><span class="pill pill-navy">Proposal Requested</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Highland Grain Millers — Corporate restructuring</div><div class="rc-sub">Source: Event · Manufacturing · Strength: Cold</div></div>
+                <div class="rc-right">KES 400,000<br><span class="pill pill-navy">Contacted</span></div>
+              </div>
+            </div>
           </div>
-          <div>
-            <strong>Invite-only access</strong>
-            <span>New users join through firm-generated invite links.</span>
+          <p class="walk-caption">The stage rail above mirrors the product's real pipeline stages, from first target through to Won or Lost — the same eight-stage progression every partner's opportunities move through.</p>
+        </div>
+
+        <!-- Tenders -->
+        <div class="walk-panel" id="panel-tenders">
+          <div class="screen">
+            <div class="screen-bar"><span>Tenders &amp; Empanelments</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="row-card">
+                <div><div class="rc-title">Nairobi City County — Legal Services Panel</div><div class="rc-sub">Est. value KES 3,500,000 · Deadline in 26 days · Owner: N. Wambugu</div></div>
+                <div class="rc-right"><span class="pill pill-gold">Partner Review</span><br>Score 89/100</div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Regional Bank Legal Panel</div><div class="rc-sub">Est. value KES 2,200,000 · Deadline in 10 days · Owner: A. Ochieng</div></div>
+                <div class="rc-right"><span class="pill pill-burgundy">Submission</span><br>Score 73/100</div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Parastatal Legal Retainer 2027</div><div class="rc-sub">Est. value KES 800,000 · Deadline in 47 days · Owner: K. Mutiso</div></div>
+                <div class="rc-right"><span class="pill pill-navy">Qualification</span><br>Score 36/100</div>
+              </div>
+              <div style="margin-top:18px;">
+                <div class="rc-sub" style="margin-bottom:8px; font-weight:600; color:var(--navy);">Bid/no-bid scoring — Nairobi City County panel</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px 20px;">
+                  <div><div class="rc-sub">Relationship with entity — 18/20</div><div class="bar-track"><div class="bar-fill" style="width:90%;"></div></div></div>
+                  <div><div class="rc-sub">Practice fit — 18/20</div><div class="bar-track"><div class="bar-fill" style="width:90%;"></div></div></div>
+                  <div><div class="rc-sub">Eligibility — 14/15</div><div class="bar-track"><div class="bar-fill navy" style="width:93%;"></div></div></div>
+                  <div><div class="rc-sub">Past experience — 13/15</div><div class="bar-track"><div class="bar-fill navy" style="width:87%;"></div></div></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div>
-            <strong>Firm-scoped data</strong>
-            <span>Pipeline, clients, tenders, referrals, and settings stay inside that firm.</span>
+          <p class="walk-caption">Tenders move through nine stages — from opportunity identification to result and lessons learned — scored on a consistent bid/no-bid rubric so the firm chases the right panels, not every panel.</p>
+        </div>
+
+        <!-- Clients -->
+        <div class="walk-panel" id="panel-clients">
+          <div class="screen">
+            <div class="screen-bar"><span>Clients</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="row-card">
+                <div><div class="rc-title">Savannah Properties Ltd</div><div class="rc-sub">Instructed on: Title due diligence, Karen development · Owner: N. Wambugu</div></div>
+                <div class="rc-right">Potential needs:<br>Succession planning</div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">PesaLink Technologies</div><div class="rc-sub">Instructed on: Data protection compliance audit · Owner: A. Ochieng</div></div>
+                <div class="rc-right">Potential needs:<br>AI governance readiness</div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">Rift Valley Manufacturers Ltd</div><div class="rc-sub">Instructed on: KRA customs objection · Owner: K. Mutiso</div></div>
+                <div class="rc-right">Potential needs:<br>Corporate restructuring</div>
+              </div>
+            </div>
+          </div>
+          <p class="walk-caption">Every client record carries what they're currently instructing you on and what else they might need — so cross-selling is a visible prompt, not a coincidence.</p>
+        </div>
+
+        <!-- Referrals -->
+        <div class="walk-panel" id="panel-referrals">
+          <div class="screen">
+            <div class="screen-bar"><span>Referral Partners</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="row-card">
+                <div><div class="rc-title">A. Hassan — Senior Auditor, regional audit firm</div><div class="rc-sub">Type: Auditor · Feeds: Tax · Owner: K. Mutiso</div></div>
+                <div class="rc-right">2 matters referred<br><span class="pill pill-navy">Last contact 14d ago</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">D. Mwangi — Real Estate Agent</div><div class="rc-sub">Type: Real-estate agent · Feeds: Real Estate &amp; Conveyancing</div></div>
+                <div class="rc-right">1 matter referred<br><span class="pill pill-gold">Last contact 41d ago</span></div>
+              </div>
+              <div class="row-card">
+                <div><div class="rc-title">G. Wanjala — Company Secretary</div><div class="rc-sub">Type: Company secretary · Feeds: Corporate &amp; Commercial</div></div>
+                <div class="rc-right">3 matters referred<br><span class="pill pill-navy">Last contact 5d ago</span></div>
+              </div>
+            </div>
+          </div>
+          <p class="walk-caption">Referral partners are tracked with the same discipline as prospects — including what they've actually produced, so the firm can see which relationships to protect.</p>
+        </div>
+
+        <!-- Scorecard -->
+        <div class="walk-panel" id="panel-scorecard">
+          <div class="screen">
+            <div class="screen-bar"><span>Monthly Partner Scorecard — March</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 10px 24px;">
+                <div><div class="rc-sub">Quality direct outreach — 64/90</div><div class="bar-track"><div class="bar-fill" style="width:71%;"></div></div></div>
+                <div><div class="rc-sub">Client / prospect meetings — 9/13</div><div class="bar-track"><div class="bar-fill" style="width:69%;"></div></div></div>
+                <div><div class="rc-sub">Referral partners contacted — 11/15</div><div class="bar-track"><div class="bar-fill navy" style="width:73%;"></div></div></div>
+                <div><div class="rc-sub">Tenders reviewed — 15/15</div><div class="bar-track"><div class="bar-fill navy" style="width:100%;"></div></div></div>
+                <div><div class="rc-sub">LinkedIn posts published — 4/12</div><div class="bar-track"><div class="bar-fill" style="width:33%;"></div></div></div>
+                <div><div class="rc-sub">Serious bids submitted — 3/4</div><div class="bar-track"><div class="bar-fill navy" style="width:75%;"></div></div></div>
+              </div>
+            </div>
+          </div>
+          <p class="walk-caption">Activity against target, firm-wide and by partner — the same categories every month, so trends are visible rather than anecdotal.</p>
+        </div>
+
+        <!-- Insights -->
+        <div class="walk-panel" id="panel-insights">
+          <div class="screen">
+            <div class="screen-bar"><span>Firm Insights — Q1</span><div class="dots"><span></span><span></span><span></span></div></div>
+            <div class="screen-body">
+              <span class="sample-tag">Sample data</span>
+              <div class="kpi-grid">
+                <div class="kpi"><div class="kpi-label">Live pipeline value</div><div class="kpi-value">KES 12.4M</div></div>
+                <div class="kpi"><div class="kpi-label">Win rate (proposals)</div><div class="kpi-value">38%</div></div>
+                <div class="kpi"><div class="kpi-label">Pipeline coverage</div><div class="kpi-value">2.6×</div></div>
+                <div class="kpi"><div class="kpi-label">Won vs. collected</div><div class="kpi-value">81%</div></div>
+              </div>
+              <div class="rc-sub" style="font-weight:600; color:var(--navy); margin-bottom:8px;">Conversion by source</div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;">
+                <div><div class="rc-sub">Referral</div><div class="bar-track"><div class="bar-fill" style="width:52%;"></div></div></div>
+                <div><div class="rc-sub">Existing client</div><div class="bar-track"><div class="bar-fill" style="width:61%;"></div></div></div>
+                <div><div class="rc-sub">Tender</div><div class="bar-track"><div class="bar-fill navy" style="width:29%;"></div></div></div>
+                <div><div class="rc-sub">Cold outreach</div><div class="bar-track"><div class="bar-fill navy" style="width:11%;"></div></div></div>
+              </div>
+            </div>
+          </div>
+          <p class="walk-caption">Insights answer questions partners are usually asked without warning: what's the pipeline worth, what's converting, and is the firm's activity actually producing revenue.</p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CLIENT GROWTH ============ -->
+<section id="client-growth" class="tight" style="background:var(--white); border-top:1px solid var(--divider); border-bottom:1px solid var(--divider);">
+  <div class="container">
+    <div class="cg-wrap">
+      <div class="cg-image fx-scale-in reveal">
+        <picture>
+          <source srcset="images/generated/bideey-client-advisory.webp" type="image/webp">
+          <img src="images/generated/bideey-client-advisory.jpg" alt="A lawyer in an advisory conversation with a long-standing client" loading="lazy" width="1672" height="941">
+        </picture>
+      </div>
+      <div class="cg-caption fx-rise reveal">
+        <span class="eyebrow">Existing clients</span>
+        <h2 style="font-size:clamp(1.4rem,2.2vw,1.9rem); margin-bottom:12px;">Winning the first instruction is only the beginning.</h2>
+        <p style="margin:0; color:var(--grey);">What they instructed you on, what they may need next, and who owns the next action — visible to the whole firm.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ WHY IT FITS ============ -->
+<section id="for-law-firms" class="band-navy">
+  <div class="container">
+    <div class="section-head wide reveal">
+      <span class="eyebrow">Why it fits African law firms</span>
+      <h2>Built for relationship-led growth.</h2>
+      <p class="section-lede">The African professional-services market is sophisticated and relationship-rich — it doesn't need generic software, it needs tools shaped to how work actually arrives.</p>
+    </div>
+    <div class="fit-grid reveal">
+      <div class="fit-item"><span class="fi-mark">→</span><p>Partner-led rainmaking, where a handful of relationships carry a disproportionate share of the firm's revenue.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Referral-driven instructions from accountants, bankers, auditors and other professionals.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Tenders and panel appointments as a serious, recurring revenue channel.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Cross-practice opportunities inside clients the firm already serves.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Mobile-first working habits — much of this happens between meetings, not at a desk.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Firms operating across multiple sectors, and increasingly multiple jurisdictions.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>The need for a system simple enough that teams will actually keep it up to date.</p></div>
+      <div class="fit-item"><span class="fi-mark">→</span><p>Local currency presentation from day one, in Kenyan shillings, with further currencies planned.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SCORECARD & INSIGHTS ============ -->
+<section id="insights" class="tight" style="background:var(--white); border-top:1px solid var(--divider); border-bottom:1px solid var(--divider);">
+  <div class="container">
+    <div class="sc-wrap">
+      <div class="sc-image fx-scale-in reveal">
+        <picture>
+          <source srcset="images/generated/bideey-scorecard-review.webp" type="image/webp">
+          <img src="images/generated/bideey-scorecard-review.jpg" alt="Partners reviewing business-development scorecard and revenue data" loading="lazy" width="1672" height="941">
+        </picture>
+      </div>
+      <div>
+        <span class="eyebrow">Scorecard &amp; insights</span>
+        <h2 style="font-size:clamp(1.5rem,2.4vw,2rem); margin-bottom:14px;">A repeatable, firm-wide discipline.</h2>
+        <p class="section-lede" style="margin-bottom:26px;">What's moving, what's stalled, and what's actually producing revenue.</p>
+
+        <div id="scMetrics">
+          <div class="sc-metric">
+            <div class="sm-top"><span class="sm-label">Proposal win rate</span><span class="sm-value" data-target="38" data-suffix="%">0%</span></div>
+            <div class="bar-track"><div class="bar-fill" data-target="38"></div></div>
+          </div>
+          <div class="sc-metric">
+            <div class="sm-top"><span class="sm-label">Pipeline coverage</span><span class="sm-value" data-target="2.6" data-suffix="×" data-decimal="1">0×</span></div>
+            <div class="bar-track"><div class="bar-fill navy" data-target="65"></div></div>
+          </div>
+          <div class="sc-metric">
+            <div class="sm-top"><span class="sm-label">Won vs. collected</span><span class="sm-value" data-target="81" data-suffix="%">0%</span></div>
+            <div class="bar-track"><div class="bar-fill" data-target="81"></div></div>
+          </div>
+          <div class="sc-metric">
+            <div class="sm-top"><span class="sm-label">Referral conversion</span><span class="sm-value" data-target="52" data-suffix="%">0%</span></div>
+            <div class="bar-track"><div class="bar-fill navy" data-target="52"></div></div>
           </div>
         </div>
-      </section>
+        <span class="sample-tag" style="margin-top:6px;">Illustrative sample data</span>
+      </div>
+    </div>
+  </div>
+</section>
 
-      <section class="section workflow-section" id="workflow">
-        <div class="section-heading">
-          <p class="eyebrow">How teams use it</p>
-          <h2>A practical rhythm for business development.</h2>
+<!-- ============ PRIVATE BETA CTA ============ -->
+<section id="beta" class="beta-band">
+  <div class="container">
+    <div class="beta-wrap">
+      <div class="beta-copy reveal">
+        <span class="eyebrow">Private beta</span>
+        <h2>Bring your firm's business development into one clear view.</h2>
+        <p>Join the private beta and test Bideey using a guided sample firm. If it fits the way your team works, we'll help you set up a dedicated environment for deeper testing.</p>
+        <div style="margin-top:26px; display:flex; gap:14px; flex-wrap:wrap;">
+          <a href="#beta-form" class="btn btn-gold">Request beta access</a>
+          <a href="mailto:lewazkiti@gmail.com?subject=Product%20walkthrough%20request" class="btn btn-outline-light">Book a product walkthrough</a>
         </div>
-        <div class="steps">
-          <article>
-            <span>01</span>
-            <h3>Capture the opportunity</h3>
-            <p>Add prospects, tenders, referrals, and relationship notes as soon as they appear.</p>
-          </article>
-          <article>
-            <span>02</span>
-            <h3>Assign the next action</h3>
-            <p>Give every opportunity an owner and a clear follow-up date.</p>
-          </article>
-          <article>
-            <span>03</span>
-            <h3>Review the firm view</h3>
-            <p>Use scorecards and insights to see what is moving, stuck, won, or overdue.</p>
-          </article>
-        </div>
-      </section>
+        <div class="beta-note">Bideey is currently available through a managed private beta. Participating firms receive a separate testing environment and onboarding guidance — the demo environment shown on this site is not connected to any firm's real data.</div>
+      </div>
 
-      <section class="section cta-section" id="contact">
-        <p class="eyebrow">Ready when your firm is</p>
-        <h2>Open your Bideey workspace or get in touch to set one up.</h2>
-        <div class="hero-actions">
-          <a class="button primary" href="https://app.bideey.com">Open app</a>
-          <a class="button secondary" href="mailto:hello@bideey.com">Contact us</a>
+      <form class="beta-form reveal" id="beta-form" action="send-beta-request.php" method="post" novalidate>
+        <div id="formFields">
+          <div class="f-grid">
+            <input type="text" name="website" tabindex="-1" autocomplete="off" class="hp-field" aria-hidden="true">
+            <div class="f-field" data-field="fullName">
+              <label for="fullName">Full name</label>
+              <input type="text" id="fullName" name="fullName" required autocomplete="name">
+              <span class="f-error">Please enter your name.</span>
+            </div>
+            <div class="f-field" data-field="workEmail">
+              <label for="workEmail">Work email</label>
+              <input type="email" id="workEmail" name="workEmail" required autocomplete="email">
+              <span class="f-error">Please enter a valid work email.</span>
+            </div>
+            <div class="f-field" data-field="firmName">
+              <label for="firmName">Firm or organisation</label>
+              <input type="text" id="firmName" name="firmName" required>
+              <span class="f-error">Please enter your firm's name.</span>
+            </div>
+            <div class="f-field" data-field="country">
+              <label for="country">Country</label>
+              <input type="text" id="country" name="country" required>
+              <span class="f-error">Please enter your country.</span>
+            </div>
+            <div class="f-field" data-field="role">
+              <label for="role">Role</label>
+              <select id="role" name="role" required>
+                <option value="">Select one</option>
+                <option>Managing Partner</option>
+                <option>Partner</option>
+                <option>Head of Business Development</option>
+                <option>Practice Lead</option>
+                <option>Administrator</option>
+                <option>Other</option>
+              </select>
+              <span class="f-error">Please select your role.</span>
+            </div>
+            <div class="f-field" data-field="teamSize">
+              <label for="teamSize">Number of partners / BD users</label>
+              <select id="teamSize" name="teamSize" required>
+                <option value="">Select one</option>
+                <option>1–5</option>
+                <option>6–15</option>
+                <option>16–30</option>
+                <option>31+</option>
+              </select>
+              <span class="f-error">Please select a team size.</span>
+            </div>
+            <div class="f-field full" data-field="currentMethod">
+              <label for="currentMethod">Current method of tracking business development</label>
+              <input type="text" id="currentMethod" name="currentMethod" placeholder="e.g. spreadsheets, WhatsApp, notebooks, nothing formal">
+            </div>
+            <div class="f-field full" data-field="challenge">
+              <label for="challenge">Biggest business-development challenge</label>
+              <textarea id="challenge" name="challenge" required></textarea>
+              <span class="f-error">Please tell us your biggest challenge.</span>
+            </div>
+            <div class="f-field full" data-field="message">
+              <label for="message">Optional message</label>
+              <textarea id="message" name="message"></textarea>
+            </div>
+          </div>
+          <div class="f-check">
+            <input type="checkbox" id="consent" name="consent" required>
+            <label for="consent">I agree to be contacted about the Bideey private beta and understand my information will be handled per the <a href="privacy.html" style="text-decoration:underline;">privacy policy</a>.</label>
+          </div>
+          <div class="f-actions">
+            <button type="submit" class="btn btn-primary">Request beta access</button>
+            <a href="mailto:lewazkiti@gmail.com?subject=Product%20walkthrough%20request" class="btn btn-outline">Book a product walkthrough</a>
+          </div>
+          <p class="form-status" id="formStatus" role="status" aria-live="polite"></p>
         </div>
-      </section>
-    </main>
+        <div class="form-success" id="formSuccess">
+          <div class="fs-icon">✓</div>
+          <h3 style="margin-bottom:10px;">Request received.</h3>
+          <p style="color:var(--grey);">Thank you — we review private-beta requests personally and will follow up by email shortly.</p>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
 
-    <footer class="site-footer">
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="site">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-brand">
+          <img src="bideey-logo.png" alt="Bideey logo" width="26" height="26">
+          <span>Bideey</span>
+        </div>
+        <p class="footer-tag">The revenue engine for relationship-led law firms.</p>
+      </div>
+      <div class="footer-col">
+        <h5>Product</h5>
+        <a href="#product">Product</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#beta">Private beta</a>
+        <a href="#app-access" class="js-app-access">Access the app</a>
+      </div>
+      <div class="footer-col">
+        <h5>Company</h5>
+        <a href="#about" id="about">About</a>
+        <a href="privacy.html">Privacy</a>
+        <a href="terms.html">Terms</a>
+        <a href="mailto:lewazkiti@gmail.com">Contact</a>
+      </div>
+      <div class="footer-col">
+        <h5>Connect</h5>
+        <a href="https://www.linkedin.com" target="_blank" rel="noopener">LinkedIn</a>
+      </div>
+    </div>
+    <hr class="rule" style="border-color: rgba(247,244,238,0.12); margin-bottom:24px;">
+    <div class="footer-bottom">
       <span>© <span id="year"></span> Bideey. All rights reserved.</span>
-      <a href="https://app.bideey.com">app.bideey.com</a>
-    </footer>
+      <span>Built in Africa for relationship-led professional firms.</span>
+    </div>
+  </div>
+</footer>
 
-    <script src="script.js"></script>
-  </body>
+<div class="app-access-modal" id="appAccessModal" aria-hidden="true">
+  <div class="app-access-backdrop" data-close-app-access></div>
+  <section class="app-access-card" role="dialog" aria-modal="true" aria-labelledby="appAccessTitle">
+    <button class="app-access-close" type="button" aria-label="Close app access popup" data-close-app-access>&times;</button>
+    <img class="app-access-logo" src="bideey-logo.png" alt="Bideey logo" width="38" height="38">
+    <h2 id="appAccessTitle">Bideey is currently in private beta.</h2>
+    <p>
+      The application is not yet open for public sign-up. Participating firms are onboarded individually,
+      with their own workspace and guidance — this keeps every firm's data separate while access is managed by invitation.
+    </p>
+    <div class="app-access-actions">
+      <a href="#beta" class="btn btn-primary" data-close-app-access>Request beta access</a>
+      <a href="mailto:lewazkiti@gmail.com?subject=Existing%20beta%20partner%20%E2%80%94%20app%20access" class="btn btn-outline">Contact us for your link</a>
+    </div>
+    <div class="app-access-note">
+      <strong>A note on access:</strong> Bideey workspaces are invite-based. If your firm is already onboarded,
+      contact us for the correct access details.
+    </div>
+  </section>
+</div>
+
+<script src="script.js"></script>
+
+</body>
 </html>
+

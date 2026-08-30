@@ -12,7 +12,7 @@ The app now supports invite-only firm workspaces so each firm sees only its own 
 
 ### Adding a firm
 
-The first user for a firm signs in and creates that firm's workspace in the app. That user becomes the firm owner. Everyone else must join through an invite link created inside **Settings → Firm Access** by the owner or an admin.
+The first user for a firm signs in and creates that firm's workspace in the app. That user becomes the firm owner. Everyone else must join through an invite link created inside **Settings → Invite your people** by the owner or an admin.
 
 A user can belong to one firm only. The database enforces this with a unique membership constraint, so the app never needs to ask users which firm to open.
 
