@@ -3932,8 +3932,8 @@ function FirmAccessPage({ activeFirm }) {
         </Field>
         <Field label="Access level">
           <select value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="member">Member</option>
-            <option value="admin">Admin</option>
+            <option value="member">BD User</option>
+            <option value="admin">Partner / admin</option>
           </select>
         </Field>
         <button className="btn btn-primary" type="submit" disabled={status === "saving"}>
