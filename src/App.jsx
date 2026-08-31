@@ -3955,8 +3955,8 @@ function FirmAccessPage({ activeFirm }) {
   );
 }
 
-function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, onClose }) {
-  const [page, setPage] = useState(null); // null = menu, or a SETTINGS_PAGES key
+function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, initialPage = null, onClose }) {
+  const [page, setPage] = useState(initialPage); // null = menu, or a SETTINGS_PAGES key
   const visiblePages = SETTINGS_PAGES.filter(
     (p) => (!p.requiresAmounts || permissions.seeAmounts) && (!p.partnerOnly || permissions.manageRoles)
   );
@@ -4091,6 +4091,7 @@ export default function App({ activeFirm, onSignOut }) {
   const [showArchivedTenders, setShowArchivedTenders] = useState({});
   const [notifOpen, setNotifOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialPage, setSettingsInitialPage] = useState(null);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
   const occupationSuggestions = useMemo(
     () => individualOccupations(store.clients, store.prospects),
@@ -4125,6 +4126,11 @@ export default function App({ activeFirm, onSignOut }) {
     document.title = "Bideey";
   }, []);
 
+  const openSettings = (initialPage = null) => {
+    setSettingsInitialPage(initialPage);
+    setSettingsOpen(true);
+  };
+
   if (!store.ready) {
     return (
       <div className="boot">
@@ -4150,10 +4156,20 @@ export default function App({ activeFirm, onSignOut }) {
             </button>
           ))}
         </div>
-        <AddPartner onAdd={store.addPartner} />
+        <AddPartner onInvite={() => openSettings("access")} />
         <SampleDataControls store={store} />
         <p className="fine">This workspace is shared with your firm's authorised users.</p>
         <button className="link-btn" onClick={onSignOut}>Sign out</button>
+        {settingsOpen && (
+          <SettingsModal
+            store={store}
+            permissions={ROLE_PERMISSIONS.partner}
+            me={me}
+            activeFirm={activeFirm}
+            initialPage={settingsInitialPage}
+            onClose={() => setSettingsOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -4194,7 +4210,6 @@ export default function App({ activeFirm, onSignOut }) {
       setNotifOpen(false);
     },
   };
-
   return (
     <div className="app">
       <Style />
@@ -4209,7 +4224,7 @@ export default function App({ activeFirm, onSignOut }) {
               🔔<span className="notif-count">{feed.total}</span>
             </button>
           )}
-          <button className="notif-bell" onClick={() => setSettingsOpen(true)} aria-label="Settings">⚙️</button>
+          <button className="notif-bell" onClick={() => openSettings()} aria-label="Settings">⚙️</button>
           <button className="me-name" onClick={() => setMe(null)}>
             {myPartner?.name || "Switch"}
           </button>
@@ -4229,7 +4244,16 @@ export default function App({ activeFirm, onSignOut }) {
         />
       )}
 
-      {settingsOpen && <SettingsModal store={store} permissions={myPermissions} me={me} activeFirm={activeFirm} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsModal
+          store={store}
+          permissions={myPermissions}
+          me={me}
+          activeFirm={activeFirm}
+          initialPage={settingsInitialPage}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
       <nav className="tabs">
         {[
@@ -5039,33 +5063,8 @@ function WatchlistPanel({ store, me, setOpenProspect, setProspectPrefill }) {
   );
 }
 
-function AddPartner({ onAdd }) {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [identity, setIdentity] = useState("");
-  const [role, setRole] = useState("partner");
-  if (!open) {
-    return <button className="add-user-btn" onClick={() => setOpen(true)}>+ Add another user</button>;
-  }
-  return (
-    <div className="add-partner">
-      <input placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />
-      <input placeholder="Market identity, e.g. Employment & Pensions" value={identity} onChange={(e) => setIdentity(e.target.value)} />
-      <select value={role} onChange={(e) => setRole(e.target.value)}>
-        {Object.keys(ROLE_PERMISSIONS).map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
-      </select>
-      <button
-        className="btn btn-primary"
-        onClick={() => {
-          if (!name.trim()) return;
-          onAdd({ name, identity, role });
-          setName(""); setIdentity(""); setRole("partner"); setOpen(false);
-        }}
-      >
-        Add {role === "admin" ? "admin / BD user" : "partner"}
-      </button>
-    </div>
-  );
+function AddPartner({ onInvite }) {
+  return <button className="add-user-btn" onClick={onInvite}>+ Add another user</button>;
 }
 
 function SampleDataControls({ store }) {
