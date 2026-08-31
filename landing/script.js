@@ -13,49 +13,6 @@
     menuToggle.setAttribute('aria-expanded', 'false');
   }));
 
-  // App access popup
-  const appAccessModal = document.getElementById('appAccessModal');
-  const appAccessTriggers = document.querySelectorAll('.js-app-access');
-  const appAccessClosers = document.querySelectorAll('[data-close-app-access]');
-  let lastFocusedBeforeModal = null;
-
-  const openAppAccessModal = () => {
-    if (!appAccessModal) return;
-    lastFocusedBeforeModal = document.activeElement;
-    appAccessModal.classList.add('open');
-    appAccessModal.setAttribute('aria-hidden', 'false');
-    document.body.classList.add('modal-open');
-    const firstButton = appAccessModal.querySelector('button, a');
-    if (firstButton) firstButton.focus();
-  };
-
-  const closeAppAccessModal = () => {
-    if (!appAccessModal) return;
-    appAccessModal.classList.remove('open');
-    appAccessModal.setAttribute('aria-hidden', 'true');
-    document.body.classList.remove('modal-open');
-    if (lastFocusedBeforeModal && typeof lastFocusedBeforeModal.focus === 'function') {
-      lastFocusedBeforeModal.focus();
-    }
-  };
-
-  appAccessTriggers.forEach(trigger => {
-    trigger.addEventListener('click', (e) => {
-      e.preventDefault();
-      openAppAccessModal();
-    });
-  });
-
-  appAccessClosers.forEach(closer => {
-    closer.addEventListener('click', closeAppAccessModal);
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && appAccessModal && appAccessModal.classList.contains('open')) {
-      closeAppAccessModal();
-    }
-  });
-
   // Respect reduced-motion preference throughout
   const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -152,7 +109,7 @@
     });
   });
 
-  // Beta form validation + submission
+  // Product walkthrough form validation + submission
   const form = document.getElementById('beta-form');
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -198,20 +155,20 @@
       const result = await response.json().catch(() => ({}));
 
       if (!response.ok || !result.ok) {
-        throw new Error(result.message || 'We could not send your request. Please try again.');
+        throw new Error(result.message || 'We could not send your walkthrough request. Please try again.');
       }
 
       document.getElementById('formFields').style.display = 'none';
       document.getElementById('formSuccess').classList.add('show');
     } catch (error) {
       if (status) {
-        status.textContent = error.message || 'We could not send your request. Please try again using the contact button.';
+        status.textContent = error.message || 'We could not send your walkthrough request. Please try again using the contact button.';
         status.classList.add('error');
       }
     } finally {
       if (submitButton) {
         submitButton.disabled = false;
-        submitButton.textContent = 'Request beta access';
+        submitButton.textContent = 'Book product walkthrough';
       }
     }
   });

@@ -65,10 +65,10 @@ if (
 }
 
 $submittedAt = gmdate('Y-m-d H:i:s') . ' UTC';
-$subject = 'New Bideey beta access request';
+$subject = 'New Bideey product walkthrough request';
 
 $html = '
-  <h2>New Bideey beta access request</h2>
+  <h2>New Bideey product walkthrough request</h2>
   <p><strong>Submitted:</strong> ' . escape_html($submittedAt) . '</p>
   <table cellpadding="8" cellspacing="0" border="0" style="border-collapse:collapse;">
     <tr><td><strong>Full name</strong></td><td>' . escape_html($fullName) . '</td></tr>
@@ -83,7 +83,7 @@ $html = '
   </table>
 ';
 
-$text = "New Bideey beta access request\n\n"
+$text = "New Bideey product walkthrough request\n\n"
     . "Submitted: {$submittedAt}\n"
     . "Full name: {$fullName}\n"
     . "Work email: {$workEmail}\n"
@@ -134,4 +134,3 @@ if ($statusCode < 200 || $statusCode >= 300) {
 }
 
 echo json_encode(['ok' => true]);
-
