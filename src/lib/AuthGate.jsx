@@ -19,6 +19,20 @@ export default function AuthGate({ children }) {
     }
   });
 
+  const cleanAuthUrl = (removeInvite = false) => {
+    const url = new URL(window.location.href);
+    if (removeInvite) url.searchParams.delete("invite");
+    if (
+      url.hash.includes("access_token=") ||
+      url.hash.includes("refresh_token=") ||
+      url.hash.includes("type=magiclink") ||
+      url.hash.includes("error=")
+    ) {
+      url.hash = "";
+    }
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
@@ -47,8 +61,7 @@ export default function AuthGate({ children }) {
         if (inviteError) {
           setError(inviteError.message || "This invite could not be accepted.");
         } else {
-          const cleanUrl = `${window.location.origin}${window.location.pathname}${window.location.hash || ""}`;
-          window.history.replaceState({}, "", cleanUrl);
+          cleanAuthUrl(true);
         }
       }
 
@@ -75,6 +88,7 @@ export default function AuthGate({ children }) {
       const first = next[0] || null;
       setActiveMembership(first);
       configureStorageContext({ firmId: first?.firm.id, userId: session.user.id });
+      cleanAuthUrl(false);
     })();
 
     return () => {

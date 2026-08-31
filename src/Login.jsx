@@ -1,6 +1,12 @@
 import { useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
+function authRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  return url.toString();
+}
+
 // Passwordless sign-in: partner enters their email, we email them a Supabase
 // magic link, clicking it signs them in (AuthGate then reacts automatically).
 export default function Login() {
@@ -16,7 +22,7 @@ export default function Login() {
     setError("");
     const { error: err } = await supabase.auth.signInWithOtp({
       email: trimmed,
-      options: { emailRedirectTo: window.location.href },
+      options: { emailRedirectTo: authRedirectUrl() },
     });
     if (err) {
       setStatus("error");

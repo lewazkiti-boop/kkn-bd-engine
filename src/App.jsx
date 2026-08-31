@@ -75,6 +75,19 @@ const ROLE_PERMISSIONS = {
   admin: { seeInsights: false, seeScorecardByPartner: false, seeAmounts: false, seeMetrics: false, usePartnerFilters: false, manageRoles: false },
 };
 const getPermissions = (partner) => ROLE_PERMISSIONS[partner?.role] || ROLE_PERMISSIONS.partner;
+const membershipRoleToAppRole = (role) => (role === "member" ? "admin" : "partner");
+const displayNameFromSession = (session) => {
+  const metadata = session?.user?.user_metadata || {};
+  const fromMetadata = metadata.full_name || metadata.name;
+  if (fromMetadata) return fromMetadata;
+
+  const email = session?.user?.email || "";
+  if (!email) return "Bideey user";
+  return email
+    .split("@")[0]
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
 
 const STAGES = [
   { key: "target", label: "Target", n: 1 },
@@ -3900,9 +3913,30 @@ function FirmAccessPage({ activeFirm }) {
       return;
     }
 
+    const invitedEmail = email.trim().toLowerCase();
     const url = new URL(window.location.origin + window.location.pathname);
     url.searchParams.set("invite", data);
-    setInviteUrl(url.toString());
+    const nextInviteUrl = url.toString();
+    setInviteUrl(nextInviteUrl);
+
+    if (invitedEmail) {
+      const { error: emailError } = await supabase.auth.signInWithOtp({
+        email: invitedEmail,
+        options: { emailRedirectTo: nextInviteUrl },
+      });
+
+      if (emailError) {
+        setStatus("error");
+        setError(
+          `Invite link created, but the email could not be sent automatically. Copy the link below and send it manually. ${emailError.message || ""}`.trim()
+        );
+        return;
+      }
+
+      setStatus("sent");
+      return;
+    }
+
     setStatus("idle");
   };
 
@@ -3937,10 +3971,11 @@ function FirmAccessPage({ activeFirm }) {
           </select>
         </Field>
         <button className="btn btn-primary" type="submit" disabled={status === "saving"}>
-          {status === "saving" ? "Creating invite…" : "Create invite link"}
+          {status === "saving" ? (email.trim() ? "Creating and sending…" : "Creating invite…") : "Create invite link"}
         </button>
       </form>
-      {status === "error" && <p className="voice-error">{error}</p>}
+      {error && <p className="voice-error">{error}</p>}
+      {status === "sent" && <p className="fine">Invite email sent. You can also copy the invite link below.</p>}
       {inviteUrl && (
         <section className="record-summary">
           <div className="record-summary-top">
@@ -4031,7 +4066,7 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
   );
 }
 
-export default function App({ activeFirm, onSignOut }) {
+export default function App({ session, activeFirm, membershipRole, onSignOut }) {
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
   const store = useStorage(activeFirmId);
   // iOS shrinks the *visible* area when the keyboard opens but leaves position:fixed elements
@@ -4131,6 +4166,37 @@ export default function App({ activeFirm, onSignOut }) {
     setSettingsOpen(true);
   };
 
+  const sessionUserId = session?.user?.id || "";
+  const sessionUserEmail = session?.user?.email || "";
+  const currentUserPartnerId = sessionUserId ? `user-${sessionUserId}` : "";
+  const currentUserAppRole = membershipRoleToAppRole(membershipRole);
+
+  useEffect(() => {
+    if (!store.ready || !sessionUserId || me) return;
+
+    const existing = store.partners.find(
+      (p) => p.userId === sessionUserId || p.id === currentUserPartnerId || (sessionUserEmail && p.email === sessionUserEmail)
+    );
+
+    if (existing) {
+      if ((existing.role || "partner") !== currentUserAppRole) {
+        store.updatePartnerRole(existing.id, currentUserAppRole);
+      }
+      setMe(existing.id);
+      return;
+    }
+
+    store.addPartner({
+      id: currentUserPartnerId,
+      userId: sessionUserId,
+      email: sessionUserEmail,
+      name: displayNameFromSession(session),
+      identity: currentUserAppRole === "admin" ? "BD User" : "Partner / admin",
+      role: currentUserAppRole,
+    });
+    setMe(currentUserPartnerId);
+  }, [currentUserAppRole, currentUserPartnerId, me, session, sessionUserEmail, sessionUserId, store]);
+
   if (!store.ready) {
     return (
       <div className="boot">
@@ -4147,29 +4213,9 @@ export default function App({ activeFirm, onSignOut }) {
         <Style />
         <div className="boot-mark" aria-hidden="true">B</div>
         <h1>Bideey</h1>
-        <p className="muted">Who's picking this up?</p>
-        <div className="who-list">
-          {store.partners.map((p) => (
-            <button key={p.id} className="who-btn" onClick={() => setMe(p.id)}>
-              <span className="who-name">{p.name}{p.role === "admin" && <span className="who-role-badge">Admin</span>}</span>
-              <span className="who-identity">{p.identity}</span>
-            </button>
-          ))}
-        </div>
-        <AddPartner onInvite={() => openSettings("access")} />
-        <SampleDataControls store={store} />
-        <p className="fine">This workspace is shared with your firm's authorised users.</p>
+        <p className="muted">Opening your workspace…</p>
+        <p className="fine">You are signed in. We are matching your account to your firm workspace.</p>
         <button className="link-btn" onClick={onSignOut}>Sign out</button>
-        {settingsOpen && (
-          <SettingsModal
-            store={store}
-            permissions={ROLE_PERMISSIONS.partner}
-            me={me}
-            activeFirm={activeFirm}
-            initialPage={settingsInitialPage}
-            onClose={() => setSettingsOpen(false)}
-          />
-        )}
       </div>
     );
   }
@@ -5060,53 +5106,6 @@ function WatchlistPanel({ store, me, setOpenProspect, setProspectPrefill }) {
         </div>
       )}
     </section>
-  );
-}
-
-function AddPartner({ onInvite }) {
-  return <button className="add-user-btn" onClick={onInvite}>+ Add another user</button>;
-}
-
-function SampleDataControls({ store }) {
-  const [mode, setMode] = useState(null); // null | "confirm-load" | "confirm-clear" | "busy"
-
-  const run = async (fn) => {
-    setMode("busy");
-    await fn();
-    setMode(null);
-  };
-
-  if (mode === "busy") return <p className="fine">Working…</p>;
-
-  if (mode === "confirm-load") {
-    return (
-      <div className="sample-data-confirm">
-        <p className="fine">This replaces everything on the board — prospects, clients, tenders, referrals, activity — with a demo dataset spanning the last few months.</p>
-        <div className="sample-data-row">
-          <button className="chip-btn" onClick={() => run(store.loadSampleData)}>Yes, load it</button>
-          <button className="chip-btn chip-ghost" onClick={() => setMode(null)}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (mode === "confirm-clear") {
-    return (
-      <div className="sample-data-confirm">
-        <p className="fine">This deletes every prospect, client, tender, referral partner, and logged activity. Partners themselves stay.</p>
-        <div className="sample-data-row">
-          <button className="chip-btn" onClick={() => run(store.clearAllData)}>Yes, clear it</button>
-          <button className="chip-btn chip-ghost" onClick={() => setMode(null)}>Cancel</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="sample-data-row">
-      <button className="link-btn" onClick={() => setMode("confirm-load")}>Load sample data</button>
-      <button className="link-btn link-btn-danger" onClick={() => setMode("confirm-clear")}>Clear all data</button>
-    </div>
   );
 }
 

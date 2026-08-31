@@ -10,4 +10,29 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-export const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "");
+function normalizeAuthHash() {
+  if (typeof window === "undefined") return;
+
+  const { hash, pathname, search } = window.location;
+  let nextHash = "";
+
+  if (hash.startsWith("##access_token") || hash.startsWith("##error")) {
+    nextHash = `#${hash.slice(2)}`;
+  } else if (hash.startsWith("#/#access_token") || hash.startsWith("#/#error")) {
+    nextHash = `#${hash.slice(3)}`;
+  }
+
+  if (nextHash) {
+    window.history.replaceState(window.history.state, "", `${pathname}${search}${nextHash}`);
+  }
+}
+
+normalizeAuthHash();
+
+export const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "", {
+  auth: {
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    persistSession: true,
+  },
+});
