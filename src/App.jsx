@@ -50,7 +50,7 @@ import { supabase } from "./lib/supabaseClient";
  *    single firm.
  * ========================================================================= */
 const DEFAULT_FIRM_ID = "kkn";
-const DEMO_REMINDER_DELAY_MS = 24 * 60 * 60 * 1000;
+const DEMO_REMINDER_DELAY_MS = 3 * 1000;
 
 const DEFAULT_PARTNERS = [
   { id: "p-gerald", name: "Gerald Kiti", identity: "Technology / AI / Cybersecurity + Strategic Relationships" },
@@ -4559,7 +4559,7 @@ function DemoDataHelper({ active, hasData, onLoadSample, onClearSample, onRemind
         {active ? (
           <>
             <button type="button" className="btn btn-primary" onClick={onClearSample}>Clear demo data</button>
-            <button type="button" className="btn btn-ghost" onClick={onRemindLater}>Remind me tomorrow</button>
+            <button type="button" className="btn btn-ghost" onClick={onRemindLater}>Remind me shortly</button>
           </>
         ) : (
           <>
