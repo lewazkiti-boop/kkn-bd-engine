@@ -51,6 +51,7 @@ import { supabase } from "./lib/supabaseClient";
  * ========================================================================= */
 const DEFAULT_FIRM_ID = "kkn";
 const DEMO_REMINDER_DELAY_MS = 3 * 1000;
+const DEMO_READY_RELOAD_COUNT = 3;
 
 const DEFAULT_PARTNERS = [
   { id: "p-gerald", name: "Gerald Kiti", identity: "Technology / AI / Cybersecurity + Strategic Relationships" },
@@ -1058,6 +1059,20 @@ function useStorage(activeFirmId) {
   const [referralTypes, setReferralTypes] = useState(DEFAULT_REFERRAL_TYPES);
   const [nextActionTemplates, setNextActionTemplates] = useState(DEFAULT_NEXT_ACTION_TEMPLATES);
   const [resourcePeople, setResourcePeople] = useState([]);
+  const [sharedDemoHelperState, setSharedDemoHelperState] = useState({});
+  const disableDemoHelperForRealData = useCallback(() => {
+    const state = { active: false, disabled: true, disabledAt: Date.now() };
+    try {
+      window.localStorage.setItem(`bideey-demo-helper-${activeFirmId}`, JSON.stringify(state));
+      window.localStorage.removeItem(`bideey-demo-backup-${activeFirmId}`);
+      window.localStorage.removeItem(`bideey-demo-reload-count-${activeFirmId}`);
+    } catch {
+      // Ignore private browsing/local storage edge cases.
+    }
+    setSharedDemoHelperState(state);
+    Promise.resolve(window.storage?.set("kkn-demo-helper-state", JSON.stringify(state))).catch(() => {});
+    window.dispatchEvent(new CustomEvent("bideey-demo-helper-state-change", { detail: { firmId: activeFirmId, state } }));
+  }, [activeFirmId]);
 
   useEffect(() => {
     (async () => {
@@ -1073,7 +1088,7 @@ function useStorage(activeFirmId) {
         const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
         const defaultTargets = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.target]));
         const defaultPartners = activeFirmId === "demo" ? DEMO_PARTNERS : activeFirmId === DEFAULT_FIRM_ID ? DEFAULT_PARTNERS : [];
-        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp] = await Promise.all([
+        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp, dh] = await Promise.all([
           safe("kkn-partners", defaultPartners),
           safe("kkn-prospects", []),
           safe("kkn-referrals", []),
@@ -1094,6 +1109,7 @@ function useStorage(activeFirmId) {
           safe("kkn-activity-targets", defaultTargets),
           safe("kkn-next-action-templates", DEFAULT_NEXT_ACTION_TEMPLATES),
           safe("kkn-resource-people", []),
+          safe("kkn-demo-helper-state", {}),
         ]);
         setPartners(pt);
         setProspects(pr);
@@ -1122,6 +1138,7 @@ function useStorage(activeFirmId) {
         setActivityTargets({ ...defaultTargets, ...at });
         setNextActionTemplates({ ...DEFAULT_NEXT_ACTION_TEMPLATES, ...nat });
         setResourcePeople(rp);
+        setSharedDemoHelperState(dh || {});
       } catch (e) {
         setError("Could not load shared data. You can keep working; changes may not save.");
       } finally {
@@ -1228,6 +1245,7 @@ function useStorage(activeFirmId) {
       saveProspect: (p) => {
         const prev = prospects.find((x) => x.id === p.id);
         const exists = Boolean(prev);
+        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? prospects.map((x) => (x.id === p.id ? p : x))
           : [...prospects, { firmId: p.firmId || activeFirmId, ...p }];
@@ -1276,6 +1294,7 @@ function useStorage(activeFirmId) {
         persist("kkn-prospects", next);
       },
       bulkImportProspects: (newProspects) => {
+        if (newProspects.length) disableDemoHelperForRealData();
         const stamped = newProspects.map((p) => ({ firmId: p.firmId || activeFirmId, ...p }));
         const nextProspects = [...prospects, ...stamped];
         const nextClients = ensureClientsForWonProspects(nextProspects, clients, activeFirmId);
@@ -1286,6 +1305,7 @@ function useStorage(activeFirmId) {
       },
       saveReferral: (r) => {
         const exists = referrals.some((x) => x.id === r.id);
+        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? referrals.map((x) => (x.id === r.id ? r : x))
           : [...referrals, { firmId: r.firmId || activeFirmId, ...r }];
@@ -1298,12 +1318,14 @@ function useStorage(activeFirmId) {
         persist("kkn-referrals", next);
       },
       bulkImportReferrals: (newReferrals) => {
+        if (newReferrals.length) disableDemoHelperForRealData();
         const stamped = newReferrals.map((r) => ({ firmId: r.firmId || activeFirmId, ...r }));
         const next = [...referrals, ...stamped];
         setReferrals(next);
         persist("kkn-referrals", next);
       },
       logActivity: (partnerId, type, subject, cost) => {
+        disableDemoHelperForRealData();
         const next = [...activity, { id: uid(), firmId: activeFirmId, partnerId, type, date: todayISO(), subject: subject || "", cost: Number(cost) || 0 }];
         setActivity(next);
         persist("kkn-activity", next);
@@ -1367,8 +1389,10 @@ function useStorage(activeFirmId) {
         persist("kkn-next-action-templates", next);
       },
       resourcePeople,
+      demoHelperState: sharedDemoHelperState,
       saveResourcePerson: (rp) => {
         const exists = resourcePeople.some((x) => x.id === rp.id);
+        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? resourcePeople.map((x) => (x.id === rp.id ? rp : x))
           : [...resourcePeople, { firmId: rp.firmId || activeFirmId, ...rp }];
@@ -1376,6 +1400,7 @@ function useStorage(activeFirmId) {
         persist("kkn-resource-people", next);
       },
       bulkImportResourcePeople: (newPeople) => {
+        if (newPeople.length) disableDemoHelperForRealData();
         const stamped = newPeople.map((rp) => ({ firmId: rp.firmId || activeFirmId, ...rp }));
         const next = [...resourcePeople, ...stamped];
         setResourcePeople(next);
@@ -1398,6 +1423,7 @@ function useStorage(activeFirmId) {
       },
       saveTender: (t) => {
         const exists = tenders.some((x) => x.id === t.id);
+        if (!exists) disableDemoHelperForRealData();
         const next = exists ? tenders.map((x) => (x.id === t.id ? t : x)) : [...tenders, { firmId: t.firmId || activeFirmId, ...t }];
         setTenders(next);
         persist("kkn-tenders", next);
@@ -1414,11 +1440,13 @@ function useStorage(activeFirmId) {
       },
       saveClient: (c) => {
         const exists = clients.some((x) => x.id === c.id);
+        if (!exists) disableDemoHelperForRealData();
         const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, { firmId: c.firmId || activeFirmId, ...c }];
         setClients(next);
         persist("kkn-clients", next);
       },
       bulkImportClients: (newClients) => {
+        if (newClients.length) disableDemoHelperForRealData();
         const stamped = newClients.map((c) => ({ firmId: c.firmId || activeFirmId, ...c }));
         const next = [...clients, ...stamped];
         setClients(next);
@@ -1492,7 +1520,7 @@ function useStorage(activeFirmId) {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, activeFirmId, persist]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, sharedDemoHelperState, activeFirmId, persist, disableDemoHelperForRealData]
   );
 
   return { ready, error, ...api };
@@ -4543,15 +4571,21 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
   );
 }
 
-function DemoDataHelper({ active, hasData, onLoadSample, onClearSample, onRemindLater, onClose }) {
+function DemoDataHelper({ active, hasData, readyAfterReloads, onLoadSample, onClearSample, onRemindLater, onClose }) {
   return (
     <aside className="demo-helper" aria-label="Demo data helper">
       <div className="demo-helper-copy">
         <span className="demo-helper-kicker">{active ? "Demo data is loaded" : "Try Bideey faster"}</span>
-        <strong>{active ? "Ready to switch to real firm data?" : hasData ? "Want sample data to explore the dashboard?" : "Load sample data and see the dashboard working."}</strong>
+        <strong>
+          {active
+            ? readyAfterReloads ? "Ready to start using your firm's real data?" : "Ready to switch to real firm data?"
+            : hasData ? "Want sample data to explore the dashboard?" : "Load sample data and see the dashboard working."}
+        </strong>
         <p>
           {active
-            ? "You can clear the demo data when the firm is ready to start entering its own leads, clients, referrals, tenders, and activity."
+            ? readyAfterReloads
+              ? "You've explored the demo a few times. Clear it when the firm is ready to start entering real leads, clients, referrals, tenders, and activity."
+              : "You can clear the demo data when the firm is ready to start entering its own leads, clients, referrals, tenders, and activity."
             : "Use fictional records to understand the flow before adding the firm's real commercial pipeline."}
         </p>
       </div>
@@ -4575,6 +4609,7 @@ function DemoDataHelper({ active, hasData, onLoadSample, onClearSample, onRemind
 export default function App({ session, activeFirm, membershipRole, onSignOut, isDemo = false }) {
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
   const store = useStorage(activeFirmId);
+  const sharedDemoHelperState = store.demoHelperState;
   // iOS shrinks the *visible* area when the keyboard opens but leaves position:fixed elements
   // sized to the full, unchanged layout viewport — that mismatch is what causes a fixed modal to
   // scroll unpredictably and let the page behind it show through. Tracking the real visual
@@ -4639,8 +4674,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const [settingsInitialPage, setSettingsInitialPage] = useState(null);
   const demoHelperKey = `bideey-demo-helper-${activeFirmId}`;
   const demoBackupKey = `bideey-demo-backup-${activeFirmId}`;
+  const demoReloadCountKey = `bideey-demo-reload-count-${activeFirmId}`;
   const [demoHelperNow, setDemoHelperNow] = useState(Date.now());
   const [demoHelperVisibleFrom, setDemoHelperVisibleFrom] = useState(() => Date.now() + DEMO_REMINDER_DELAY_MS);
+  const [demoReloadCount, setDemoReloadCount] = useState(() => {
+    try {
+      return Number(window.localStorage.getItem(demoReloadCountKey) || 0);
+    } catch {
+      return 0;
+    }
+  });
   const [demoHelperState, setDemoHelperState] = useState(() => {
     try {
       return JSON.parse(window.localStorage.getItem(demoHelperKey) || "{}");
@@ -4648,6 +4691,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       return {};
     }
   });
+  const demoReloadCountedRef = useRef(false);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
   const occupationSuggestions = useMemo(
     () => individualOccupations(store.clients, store.prospects),
@@ -4690,7 +4734,38 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     }
     setDemoHelperVisibleFrom(Date.now() + DEMO_REMINDER_DELAY_MS);
     setDemoHelperNow(Date.now());
-  }, [demoHelperKey]);
+    demoReloadCountedRef.current = false;
+    try {
+      setDemoReloadCount(Number(window.localStorage.getItem(demoReloadCountKey) || 0));
+    } catch {
+      setDemoReloadCount(0);
+    }
+  }, [demoHelperKey, demoReloadCountKey]);
+
+  useEffect(() => {
+    if (isDemo || !demoHelperState.active || demoHelperState.disabled) return;
+    try {
+      if (demoReloadCountedRef.current) return;
+      const nextCount = Number(window.localStorage.getItem(demoReloadCountKey) || 0) + 1;
+      window.localStorage.setItem(demoReloadCountKey, String(nextCount));
+      demoReloadCountedRef.current = true;
+      setDemoReloadCount(nextCount);
+      if (nextCount >= DEMO_READY_RELOAD_COUNT) {
+        const next = { ...demoHelperState, readyAfterReloads: true, remindAt: Date.now() };
+        setDemoHelperState(next);
+        window.localStorage.setItem(demoHelperKey, JSON.stringify(next));
+        setDemoHelperNow(Date.now());
+      }
+    } catch {
+      // Ignore private browsing/local storage edge cases.
+    }
+  }, [demoHelperState, demoHelperKey, demoReloadCountKey, isDemo]);
+
+  useEffect(() => {
+    if (!sharedDemoHelperState?.disabled) return;
+    setDemoHelperState(sharedDemoHelperState);
+    setDemoHelperNow(Date.now());
+  }, [sharedDemoHelperState]);
 
   useEffect(() => {
     if (isDemo) return;
@@ -4699,6 +4774,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     const timer = window.setTimeout(() => setDemoHelperNow(Date.now()), waitMs);
     return () => window.clearTimeout(timer);
   }, [demoHelperState.remindAt, demoHelperVisibleFrom, isDemo]);
+
+  useEffect(() => {
+    const handleDemoStateChange = (event) => {
+      if (event.detail?.firmId !== activeFirmId) return;
+      setDemoHelperState(event.detail.state || {});
+      setDemoHelperNow(Date.now());
+    };
+    window.addEventListener("bideey-demo-helper-state-change", handleDemoStateChange);
+    return () => window.removeEventListener("bideey-demo-helper-state-change", handleDemoStateChange);
+  }, [activeFirmId]);
 
   const openSettings = (initialPage = null) => {
     setSettingsInitialPage(initialPage);
@@ -4725,11 +4810,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       if (!demoHelperState.active) {
         window.localStorage.setItem(demoBackupKey, JSON.stringify(snapshotDashboardData()));
       }
+      window.localStorage.setItem(demoReloadCountKey, "0");
     } catch {
       // If backup storage is unavailable, the sample data still loads.
     }
+    demoReloadCountedRef.current = true;
+    setDemoReloadCount(0);
     await store.loadSampleData();
-    saveDemoHelperState({ active: true, loadedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
+    const next = { active: true, loadedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS };
+    Promise.resolve(window.storage?.set("kkn-demo-helper-state", JSON.stringify(next))).catch(() => {});
+    saveDemoHelperState(next);
   };
   const clearDashboardSampleData = async () => {
     let backup = null;
@@ -4745,10 +4835,15 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     }
     try {
       window.localStorage.removeItem(demoBackupKey);
+      window.localStorage.removeItem(demoReloadCountKey);
     } catch {
       // Ignore private browsing/local storage edge cases.
     }
-    saveDemoHelperState({ active: false, clearedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
+    demoReloadCountedRef.current = false;
+    setDemoReloadCount(0);
+    const next = { active: false, clearedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS };
+    Promise.resolve(window.storage?.set("kkn-demo-helper-state", JSON.stringify(next))).catch(() => {});
+    saveDemoHelperState(next);
   };
   const remindDemoHelperLater = () => {
     saveDemoHelperState({ ...demoHelperState, remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
@@ -4823,7 +4918,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
   const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
-  const shouldShowDemoHelper = !isDemo && demoHelperNow >= (demoHelperState.remindAt || demoHelperVisibleFrom);
+  const shouldShowDemoHelper = !isDemo && !demoHelperState.disabled && demoHelperNow >= (demoHelperState.remindAt || demoHelperVisibleFrom);
   const visibleProspects = store.prospects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
@@ -4913,6 +5008,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         <DemoDataHelper
           active={Boolean(demoHelperState.active)}
           hasData={hasDashboardData}
+          readyAfterReloads={Boolean(demoHelperState.readyAfterReloads || demoReloadCount >= DEMO_READY_RELOAD_COUNT)}
           onLoadSample={loadDashboardSampleData}
           onClearSample={clearDashboardSampleData}
           onRemindLater={remindDemoHelperLater}
