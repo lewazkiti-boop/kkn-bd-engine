@@ -50,7 +50,7 @@ import { supabase } from "./lib/supabaseClient";
  *    single firm.
  * ========================================================================= */
 const DEFAULT_FIRM_ID = "kkn";
-const DEMO_APP_URL = "https://demo.bideey.com";
+const DEMO_REMINDER_DELAY_MS = 24 * 60 * 60 * 1000;
 
 const DEFAULT_PARTNERS = [
   { id: "p-gerald", name: "Gerald Kiti", identity: "Technology / AI / Cybersecurity + Strategic Relationships" },
@@ -1467,6 +1467,28 @@ function useStorage(activeFirmId) {
           persist("kkn-tender-vault", {}),
           persist("kkn-prospects", []),
           persist("kkn-activity", []),
+        ]);
+      },
+      restoreDataSnapshot: async (snapshot = {}) => {
+        const nextReferrals = snapshot.referrals || [];
+        const nextClients = snapshot.clients || [];
+        const nextTenders = snapshot.tenders || [];
+        const nextVault = snapshot.vault || {};
+        const nextProspects = snapshot.prospects || [];
+        const nextActivity = snapshot.activity || [];
+        setReferrals(nextReferrals);
+        setClients(nextClients);
+        setTenders(nextTenders);
+        setVault(nextVault);
+        setProspects(nextProspects);
+        setActivity(nextActivity);
+        await Promise.all([
+          persist("kkn-referrals", nextReferrals),
+          persist("kkn-clients", nextClients),
+          persist("kkn-tenders", nextTenders),
+          persist("kkn-tender-vault", nextVault),
+          persist("kkn-prospects", nextProspects),
+          persist("kkn-activity", nextActivity),
         ]);
       },
     }),
@@ -4521,6 +4543,35 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
   );
 }
 
+function DemoDataHelper({ active, hasData, onLoadSample, onClearSample, onRemindLater, onClose }) {
+  return (
+    <aside className="demo-helper" aria-label="Demo data helper">
+      <div className="demo-helper-copy">
+        <span className="demo-helper-kicker">{active ? "Demo data is loaded" : "Try Bideey faster"}</span>
+        <strong>{active ? "Ready to switch to real firm data?" : hasData ? "Want sample data to explore the dashboard?" : "Load sample data and see the dashboard working."}</strong>
+        <p>
+          {active
+            ? "You can clear the demo data when the firm is ready to start entering its own leads, clients, referrals, tenders, and activity."
+            : "Use fictional records to understand the flow before adding the firm's real commercial pipeline."}
+        </p>
+      </div>
+      <div className="demo-helper-actions">
+        {active ? (
+          <>
+            <button type="button" className="btn btn-primary" onClick={onClearSample}>Clear demo data</button>
+            <button type="button" className="btn btn-ghost" onClick={onRemindLater}>Remind me tomorrow</button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn btn-primary" onClick={onLoadSample}>Load sample data</button>
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Not now</button>
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
 export default function App({ session, activeFirm, membershipRole, onSignOut, isDemo = false }) {
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
   const store = useStorage(activeFirmId);
@@ -4586,11 +4637,13 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const [notifOpen, setNotifOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialPage, setSettingsInitialPage] = useState(null);
-  const [showDemoPrompt, setShowDemoPrompt] = useState(() => {
+  const demoHelperKey = `bideey-demo-helper-${activeFirmId}`;
+  const demoBackupKey = `bideey-demo-backup-${activeFirmId}`;
+  const [demoHelperState, setDemoHelperState] = useState(() => {
     try {
-      return !window.sessionStorage.getItem("bideey-demo-prompt-dismissed");
+      return JSON.parse(window.localStorage.getItem(demoHelperKey) || "{}");
     } catch {
-      return true;
+      return {};
     }
   });
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
@@ -4627,17 +4680,66 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     document.title = "Bideey";
   }, []);
 
+  useEffect(() => {
+    try {
+      setDemoHelperState(JSON.parse(window.localStorage.getItem(demoHelperKey) || "{}"));
+    } catch {
+      setDemoHelperState({});
+    }
+  }, [demoHelperKey]);
+
   const openSettings = (initialPage = null) => {
     setSettingsInitialPage(initialPage);
     setSettingsOpen(true);
   };
-  const dismissDemoPrompt = () => {
+  const saveDemoHelperState = (next) => {
+    setDemoHelperState(next);
     try {
-      window.sessionStorage.setItem("bideey-demo-prompt-dismissed", "1");
+      window.localStorage.setItem(demoHelperKey, JSON.stringify(next));
     } catch {
-      // Ignore private browsing/session storage edge cases.
+      // Ignore private browsing/local storage edge cases.
     }
-    setShowDemoPrompt(false);
+  };
+  const snapshotDashboardData = () => ({
+    prospects: store.prospects,
+    referrals: store.referrals,
+    clients: store.clients,
+    tenders: store.tenders,
+    vault: store.vault,
+    activity: store.activity,
+  });
+  const loadDashboardSampleData = async () => {
+    try {
+      if (!demoHelperState.active) {
+        window.localStorage.setItem(demoBackupKey, JSON.stringify(snapshotDashboardData()));
+      }
+    } catch {
+      // If backup storage is unavailable, the sample data still loads.
+    }
+    await store.loadSampleData();
+    saveDemoHelperState({ active: true, loadedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
+  };
+  const clearDashboardSampleData = async () => {
+    let backup = null;
+    try {
+      backup = JSON.parse(window.localStorage.getItem(demoBackupKey) || "null");
+    } catch {
+      backup = null;
+    }
+    if (backup) {
+      await store.restoreDataSnapshot(backup);
+    } else {
+      await store.clearAllData();
+    }
+    try {
+      window.localStorage.removeItem(demoBackupKey);
+    } catch {
+      // Ignore private browsing/local storage edge cases.
+    }
+    saveDemoHelperState({ active: false, clearedAt: Date.now(), remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
+  };
+  const remindDemoHelperLater = () => {
+    saveDemoHelperState({ ...demoHelperState, remindAt: Date.now() + DEMO_REMINDER_DELAY_MS });
   };
 
   const sessionUserId = session?.user?.id || "";
@@ -4708,6 +4810,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPartner = store.partners.find((p) => p.id === me);
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
+  const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
+  const shouldShowDemoHelper = !isDemo && (!demoHelperState.remindAt || Date.now() >= demoHelperState.remindAt) && (!hasDashboardData || demoHelperState.active);
   const visibleProspects = store.prospects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
@@ -4793,26 +4897,15 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         />
       )}
 
-      {!isDemo && showDemoPrompt && (
-        <div className="overlay" onClick={dismissDemoPrompt}>
-          <div className="sheet demo-prompt-sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-head">
-              <h3>Want to explore the demo workspace?</h3>
-              <button className="icon-btn" onClick={dismissDemoPrompt} aria-label="Close">✕</button>
-            </div>
-            <div className="sheet-body">
-              <p className="insight-note">
-                Open a fictional Bideey workspace with sample leads, clients, referrals, tenders, and activity. It is safe to play around there without touching this firm's real data.
-              </p>
-            </div>
-            <div className="sheet-actions">
-              <a className="btn btn-primary" href={DEMO_APP_URL} target="_blank" rel="noopener" onClick={dismissDemoPrompt}>
-                View demo
-              </a>
-              <button className="btn btn-ghost" onClick={dismissDemoPrompt}>Continue to workspace</button>
-            </div>
-          </div>
-        </div>
+      {shouldShowDemoHelper && (
+        <DemoDataHelper
+          active={Boolean(demoHelperState.active)}
+          hasData={hasDashboardData}
+          onLoadSample={loadDashboardSampleData}
+          onClearSample={clearDashboardSampleData}
+          onRemindLater={remindDemoHelperLater}
+          onClose={remindDemoHelperLater}
+        />
       )}
 
       <nav className="tabs">
@@ -6984,6 +7077,18 @@ export function Style() {
       .fine{ font-size:11.5px; color:var(--muted); margin-top:18px; }
 
       .demo-banner{ background:#fff4d6; color:#5f3b00; border-bottom:1px solid #ead39d; padding:8px 16px; text-align:center; font-size:12.5px; font-weight:800; }
+      .demo-helper{ position:fixed; left:50%; bottom:18px; transform:translateX(-50%); z-index:8; width:calc(100% - 28px); max-width:532px; background:#fff; border:1px solid rgba(200,155,60,0.45); border-radius:16px; padding:14px; box-shadow:0 18px 45px rgba(11,42,74,0.22); display:flex; gap:14px; align-items:center; }
+      .demo-helper-copy{ flex:1; min-width:0; }
+      .demo-helper-kicker{ display:block; color:var(--amber); font-size:10.5px; font-weight:900; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:3px; }
+      .demo-helper strong{ display:block; color:var(--navy); font-size:14.5px; line-height:1.25; }
+      .demo-helper p{ color:var(--muted); font-size:12.3px; line-height:1.45; margin:4px 0 0; }
+      .demo-helper-actions{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; flex:0 0 auto; }
+      .demo-helper-actions .btn{ padding:9px 12px; font-size:12.5px; white-space:nowrap; }
+      @media (max-width:480px){
+        .demo-helper{ align-items:flex-start; flex-direction:column; }
+        .demo-helper-actions{ width:100%; justify-content:stretch; }
+        .demo-helper-actions .btn{ flex:1 1 140px; }
+      }
       .topbar{ position:sticky; top:0; z-index:5; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; }
       .brand{ display:flex; align-items:center; gap:8px; background:none; border:none; padding:0; cursor:pointer; text-align:left; }
       .brand-icon{ width:28px; height:28px; display:grid; place-items:center; }
