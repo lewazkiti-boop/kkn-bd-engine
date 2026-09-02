@@ -50,6 +50,7 @@ import { supabase } from "./lib/supabaseClient";
  *    single firm.
  * ========================================================================= */
 const DEFAULT_FIRM_ID = "kkn";
+const DEMO_APP_URL = "https://demo.bideey.com";
 
 const DEFAULT_PARTNERS = [
   { id: "p-gerald", name: "Gerald Kiti", identity: "Technology / AI / Cybersecurity + Strategic Relationships" },
@@ -363,6 +364,18 @@ async function parseSpreadsheetFile(file) {
   const workbook = XLSX.read(data, { type: "array" });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+}
+
+async function parseDocxTable(file) {
+  const mammoth = await loadScript("https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js", "mammoth");
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer });
+  const doc = new DOMParser().parseFromString(result.value, "text/html");
+  const table = doc.querySelector("table");
+  if (!table) return null;
+  return [...table.querySelectorAll("tr")].map((tr) =>
+    [...tr.querySelectorAll("td, th")].map((cell) => cell.textContent.trim())
+  );
 }
 
 const csvEscape = (value) => {
@@ -4573,6 +4586,13 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const [notifOpen, setNotifOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialPage, setSettingsInitialPage] = useState(null);
+  const [showDemoPrompt, setShowDemoPrompt] = useState(() => {
+    try {
+      return !window.sessionStorage.getItem("bideey-demo-prompt-dismissed");
+    } catch {
+      return true;
+    }
+  });
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
   const occupationSuggestions = useMemo(
     () => individualOccupations(store.clients, store.prospects),
@@ -4610,6 +4630,14 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const openSettings = (initialPage = null) => {
     setSettingsInitialPage(initialPage);
     setSettingsOpen(true);
+  };
+  const dismissDemoPrompt = () => {
+    try {
+      window.sessionStorage.setItem("bideey-demo-prompt-dismissed", "1");
+    } catch {
+      // Ignore private browsing/session storage edge cases.
+    }
+    setShowDemoPrompt(false);
   };
 
   const sessionUserId = session?.user?.id || "";
@@ -4763,6 +4791,28 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           initialPage={settingsInitialPage}
           onClose={() => setSettingsOpen(false)}
         />
+      )}
+
+      {!isDemo && showDemoPrompt && (
+        <div className="overlay" onClick={dismissDemoPrompt}>
+          <div className="sheet demo-prompt-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="sheet-head">
+              <h3>Want to explore the demo workspace?</h3>
+              <button className="icon-btn" onClick={dismissDemoPrompt} aria-label="Close">✕</button>
+            </div>
+            <div className="sheet-body">
+              <p className="insight-note">
+                Open a fictional Bideey workspace with sample leads, clients, referrals, tenders, and activity. It is safe to play around there without touching this firm's real data.
+              </p>
+            </div>
+            <div className="sheet-actions">
+              <a className="btn btn-primary" href={DEMO_APP_URL} target="_blank" rel="noopener" onClick={dismissDemoPrompt}>
+                View demo
+              </a>
+              <button className="btn btn-ghost" onClick={dismissDemoPrompt}>Continue to workspace</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <nav className="tabs">
@@ -5652,12 +5702,21 @@ function ImportModal({ entityType, existingItems, me, onImport, onClose }) {
     setFileName(file.name);
     try {
       const ext = file.name.split(".").pop().toLowerCase();
-      if (!["xlsx", "xls", "csv"].includes(ext)) {
-        setError("Unsupported file type. Please upload a .csv, .xlsx, or .xls file.");
+      let rows;
+      if (["xlsx", "xls", "csv"].includes(ext)) {
+        rows = await parseSpreadsheetFile(file);
+      } else if (ext === "docx") {
+        rows = await parseDocxTable(file);
+        if (!rows) {
+          setError("No table found in this document. Bideey can only reliably pull structured data out of an actual table — try exporting the list as a spreadsheet (.xlsx or .csv) instead.");
+          setLoading(false);
+          return;
+        }
+      } else {
+        setError("Unsupported file type. Please upload a .csv, .xlsx, .xls, or .docx file with a table.");
         setLoading(false);
         return;
       }
-      let rows = await parseSpreadsheetFile(file);
       rows = rows.filter((r) => r.some((cell) => String(cell || "").trim()));
       if (rows.length < 2) {
         setError("Couldn't find any data rows below the header row.");
@@ -5734,7 +5793,7 @@ function ImportModal({ entityType, existingItems, me, onImport, onClose }) {
                 {loading ? "Reading file…" : "📄 Choose a file to import"}
                 <input
                   type="file"
-                  accept=".xlsx,.xls,.csv"
+                  accept=".xlsx,.xls,.csv,.docx"
                   style={{ display: "none" }}
                   onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
                   disabled={loading}
@@ -5742,7 +5801,7 @@ function ImportModal({ entityType, existingItems, me, onImport, onClose }) {
               </label>
               {error && <p className="save-error">⚠️ {error}</p>}
               <p className="insight-note" style={{ marginTop: 10 }}>
-                Start from the sample CSV if you want the fastest path. Missing optional details are fine; you can fill them in later.
+                Start from the sample CSV if you want the fastest path. You can also upload a .docx file if the details are in a real table. Missing optional details are fine; you can fill them in later.
               </p>
             </>
           )}
