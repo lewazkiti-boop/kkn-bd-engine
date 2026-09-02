@@ -4639,6 +4639,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const [settingsInitialPage, setSettingsInitialPage] = useState(null);
   const demoHelperKey = `bideey-demo-helper-${activeFirmId}`;
   const demoBackupKey = `bideey-demo-backup-${activeFirmId}`;
+  const [demoHelperNow, setDemoHelperNow] = useState(Date.now());
+  const [demoHelperVisibleFrom, setDemoHelperVisibleFrom] = useState(() => Date.now() + DEMO_REMINDER_DELAY_MS);
   const [demoHelperState, setDemoHelperState] = useState(() => {
     try {
       return JSON.parse(window.localStorage.getItem(demoHelperKey) || "{}");
@@ -4686,7 +4688,17 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     } catch {
       setDemoHelperState({});
     }
+    setDemoHelperVisibleFrom(Date.now() + DEMO_REMINDER_DELAY_MS);
+    setDemoHelperNow(Date.now());
   }, [demoHelperKey]);
+
+  useEffect(() => {
+    if (isDemo) return;
+    const nextShowAt = demoHelperState.remindAt || demoHelperVisibleFrom;
+    const waitMs = Math.max(0, nextShowAt - Date.now());
+    const timer = window.setTimeout(() => setDemoHelperNow(Date.now()), waitMs);
+    return () => window.clearTimeout(timer);
+  }, [demoHelperState.remindAt, demoHelperVisibleFrom, isDemo]);
 
   const openSettings = (initialPage = null) => {
     setSettingsInitialPage(initialPage);
@@ -4811,7 +4823,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
   const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
-  const shouldShowDemoHelper = !isDemo && (!demoHelperState.remindAt || Date.now() >= demoHelperState.remindAt) && (!hasDashboardData || demoHelperState.active);
+  const shouldShowDemoHelper = !isDemo && demoHelperNow >= (demoHelperState.remindAt || demoHelperVisibleFrom);
   const visibleProspects = store.prospects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
