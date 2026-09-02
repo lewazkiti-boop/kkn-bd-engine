@@ -16,6 +16,8 @@ import { supabase } from "./supabaseClient";
  */
 
 const LOCAL_PREFIX = "kkn-local:";
+const DEMO_PREFIX = "kkn-demo:";
+const isDemoMode = import.meta.env.VITE_APP_MODE === "demo";
 let activeFirmId = null;
 let activeUserId = null;
 
@@ -25,6 +27,7 @@ export function configureStorageContext({ firmId, userId } = {}) {
 }
 
 const localKey = (key) => `${LOCAL_PREFIX}${activeFirmId || "no-firm"}:${activeUserId || "anonymous"}:${key}`;
+const demoKey = (key) => `${DEMO_PREFIX}${activeFirmId || "demo"}:${key}`;
 
 function requireFirm() {
   if (!activeFirmId) {
@@ -34,9 +37,9 @@ function requireFirm() {
 }
 
 async function get(key, shared = true) {
-  if (!shared) {
+  if (!shared || isDemoMode) {
     try {
-      const raw = window.localStorage.getItem(localKey(key));
+      const raw = window.localStorage.getItem(shared && isDemoMode ? demoKey(key) : localKey(key));
       return raw === null ? null : { value: raw };
     } catch (e) {
       // eslint-disable-next-line no-console
@@ -66,9 +69,9 @@ async function get(key, shared = true) {
 }
 
 async function set(key, value, shared = true) {
-  if (!shared) {
+  if (!shared || isDemoMode) {
     try {
-      window.localStorage.setItem(localKey(key), value);
+      window.localStorage.setItem(shared && isDemoMode ? demoKey(key) : localKey(key), value);
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error(`[storage] local set(${key}) failed:`, e.message);

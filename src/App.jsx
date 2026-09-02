@@ -58,6 +58,13 @@ const DEFAULT_PARTNERS = [
   { id: "p-c", name: "George Kimotho", identity: "Tax" },
   { id: "p-d", name: "Lorraine Ouma", identity: "Commercial Litigation" },
 ];
+const DEMO_PARTNERS = [
+  { id: "p-gerald", userId: "demo-user", email: "demo@bideey.com", name: "Demo Partner", identity: "Managing Partner", role: "partner", canExport: true },
+  { id: "p-a", name: "Amina Kariuki", identity: "Corporate & Commercial", role: "partner", canExport: true },
+  { id: "p-b", name: "Brian Otieno", identity: "Real Estate & Conveyancing", role: "partner" },
+  { id: "p-c", name: "Caroline Mwangi", identity: "Tax", role: "partner" },
+  { id: "p-d", name: "David Njoroge", identity: "Commercial Litigation", role: "partner" },
+];
 
 // Access levels. This is a UI-level gate, not a hard security boundary — window.storage has no
 // server-side per-role permissions, so a restricted person could in principle still find the
@@ -65,7 +72,7 @@ const DEFAULT_PARTNERS = [
 // figures out of the screens someone doesn't need, without pretending to be adversarial security.
 // Adding a new access level later (e.g. a partial-access admin) is just a new key here — nothing
 // else in the app needs to change, since every gate below checks a permission flag, not a role name.
-const ROLE_LABELS = { partner: "Partner", admin: "Admin / BD user" };
+const ROLE_LABELS = { partner: "Partner", admin: "Office Admin" };
 const ROLE_HELP = {
   partner: "Full access — pipeline, tenders, clients, referrals, Scorecard, and Insights.",
   admin: "Adds and updates records — clients, tenders, prospects, referrals — without seeing money, performance figures, or partner-by-partner views. Can't filter by partner either.",
@@ -328,6 +335,369 @@ function ensureClientsForWonProspects(prospects, clients, firmId = DEFAULT_FIRM_
     });
   return result;
 }
+
+function loadScript(src, globalName) {
+  return new Promise((resolve, reject) => {
+    if (window[globalName]) {
+      resolve(window[globalName]);
+      return;
+    }
+    const existing = document.querySelector(`script[data-loader="${globalName}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window[globalName]));
+      existing.addEventListener("error", () => reject(new Error(`Failed to load ${globalName}`)));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.dataset.loader = globalName;
+    script.onload = () => resolve(window[globalName]);
+    script.onerror = () => reject(new Error(`Failed to load ${globalName}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function parseSpreadsheetFile(file) {
+  const XLSX = await loadScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js", "XLSX");
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data, { type: "array" });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+}
+
+const csvEscape = (value) => {
+  const text = String(value ?? "");
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+};
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(csvEscape).join(",")).join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+const normalizeImportKey = (value) => (value || "").toString().trim().toLowerCase();
+const splitListValue = (value) => value.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+const matchChoice = (value, choices, fallback = "") => {
+  const found = choices.find((choice) => choice.toLowerCase() === value.trim().toLowerCase());
+  return found || fallback;
+};
+
+const IMPORT_ENTITY_CONFIGS = {
+  prospect: {
+    title: "Import leads",
+    label: "lead",
+    labelPlural: "leads",
+    nameKey: "organization",
+    templateName: "bideey-leads-template.csv",
+    sampleRows: [
+      ["organization", "contact_person", "email", "phone", "sector", "practice_area", "opportunity", "source", "relationship_strength", "status", "next_action", "next_action_date", "estimated_value", "notes"],
+      ["Acme Holdings", "Jane Mwangi", "jane@acme.co.ke", "+254700000000", "Financial Services & Banking", "Corporate & Commercial", "Potential retainer", "Referral", "Warm", "Target", "Schedule intro call", todayISO(), "250000", "Met at banking forum"],
+    ],
+    fieldOptions: [
+      { key: "", label: "Don't import this column" },
+      { key: "organization", label: "Organization / lead name" },
+      { key: "contact", label: "Contact person" },
+      { key: "contactEmail", label: "Email" },
+      { key: "contactPhone", label: "Phone" },
+      { key: "sector", label: "Sector" },
+      { key: "practiceArea", label: "Practice area" },
+      { key: "opportunity", label: "Opportunity" },
+      { key: "source", label: "Source" },
+      { key: "strength", label: "Relationship strength" },
+      { key: "status", label: "Pipeline status" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "estimatedValue", label: "Estimated value" },
+      { key: "notes", label: "Notes" },
+    ],
+    guessMapping: (key) => {
+      if (/organi[sz]ation|company|firm|lead|client|name/.test(key)) return "organization";
+      if (/contact|person/.test(key) && !/phone|email/.test(key)) return "contact";
+      if (/email/.test(key)) return "contactEmail";
+      if (/phone|mobile|tel/.test(key)) return "contactPhone";
+      if (/sector|industry/.test(key)) return "sector";
+      if (/practice/.test(key)) return "practiceArea";
+      if (/opportunity|matter|need/.test(key)) return "opportunity";
+      if (/source|origin|via/.test(key)) return "source";
+      if (/strength|relationship/.test(key)) return "strength";
+      if (/status|stage/.test(key)) return "status";
+      if (/next.*date|follow.*date/.test(key)) return "nextActionDate";
+      if (/next|follow/.test(key)) return "nextAction";
+      if (/value|amount|fee|estimate/.test(key)) return "estimatedValue";
+      if (/note|comment/.test(key)) return "notes";
+      return "";
+    },
+    buildDefaults: (me) => ({
+      id: uid(),
+      responsiblePartner: me,
+      status: "target",
+      strength: "Warm",
+      source: "Import",
+      probability: 25,
+      estimatedValue: "",
+      nextAction: "",
+      nextActionDate: "",
+      notes: "",
+      notesHistory: [],
+      statusHistory: [{ kind: "stage", stage: "target", date: todayISO() }],
+      archived: false,
+    }),
+    applyField: (obj, key, value) => {
+      if (key === "status") {
+        const normalized = normalizeImportKey(value).replaceAll(" ", "_");
+        const found = STAGES.find((s) => s.key === normalized || normalizeImportKey(s.label).replaceAll(" ", "_") === normalized);
+        obj.status = found?.key || "target";
+        obj.statusHistory = [{ kind: "stage", stage: obj.status, date: todayISO() }];
+      } else if (key === "strength") {
+        obj.strength = matchChoice(value, STRENGTHS, "Warm");
+      } else if (key === "source") {
+        obj.source = matchChoice(value, SOURCES, value || "Import");
+      } else if (key === "estimatedValue") {
+        obj.estimatedValue = value.replace(/[^0-9.]/g, "");
+      } else {
+        obj[key] = value;
+      }
+    },
+  },
+  client: {
+    title: "Import clients",
+    label: "client",
+    labelPlural: "clients",
+    nameKey: "name",
+    templateName: "bideey-clients-template.csv",
+    sampleRows: [
+      ["name", "contact_person", "position", "sector", "phone", "email", "instructed_on", "possible_need", "origin", "last_contact", "next_action", "next_action_date", "notes"],
+      ["Acme Holdings", "Jane Mwangi", "Legal Counsel", "Financial Services & Banking", "+254700000000", "jane@acme.co.ke", "Corporate advisory", "Employment review", "Referral", todayISO(), "Schedule review meeting", todayISO(), "Existing client"],
+    ],
+    fieldOptions: [
+      { key: "", label: "Don't import this column" },
+      { key: "name", label: "Client / organization name" },
+      { key: "contact", label: "Contact person" },
+      { key: "position", label: "Position" },
+      { key: "sector", label: "Sector" },
+      { key: "contactPhone", label: "Phone" },
+      { key: "contactEmail", label: "Email" },
+      { key: "instructedOn", label: "What they instructed us on" },
+      { key: "potentialNeeds", label: "What else they probably need" },
+      { key: "origin", label: "Origin" },
+      { key: "lastContact", label: "Last contact" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "notes", label: "Notes" },
+    ],
+    guessMapping: (key) => {
+      if (/name|client|organi[sz]ation|company/.test(key)) return "name";
+      if (/contact|person/.test(key) && !/phone|email/.test(key)) return "contact";
+      if (/position|title|role/.test(key)) return "position";
+      if (/sector|industry/.test(key)) return "sector";
+      if (/phone|mobile|tel/.test(key)) return "contactPhone";
+      if (/email/.test(key)) return "contactEmail";
+      if (/instruct/.test(key)) return "instructedOn";
+      if (/need|opportunity/.test(key)) return "potentialNeeds";
+      if (/origin|source|via/.test(key)) return "origin";
+      if (/last.*contact/.test(key)) return "lastContact";
+      if (/next.*date|follow.*date/.test(key)) return "nextActionDate";
+      if (/next|follow/.test(key)) return "nextAction";
+      if (/note|comment/.test(key)) return "notes";
+      return "";
+    },
+    buildDefaults: (me) => ({
+      id: uid(),
+      clientType: "Institutional",
+      origin: "Import",
+      responsiblePartner: me,
+      lastContact: todayISO(),
+      nextAction: "",
+      nextActionDate: "",
+      notes: "",
+      notesHistory: [],
+      hasRetainer: false,
+      retainerAmount: "",
+      retainerFrequency: "Monthly",
+      retainerRenewalDate: "",
+    }),
+    applyField: (obj, key, value) => { obj[key] = value; },
+  },
+  referral: {
+    title: "Import referral partners",
+    label: "referral partner",
+    labelPlural: "referral partners",
+    nameKey: "name",
+    templateName: "bideey-referral-partners-template.csv",
+    sampleRows: [
+      ["name", "institution", "type", "practice_fed", "phone", "email", "last_contact", "next_action", "next_action_date", "notes"],
+      ["John Kamau", "Kamau Tax Advisory", "Accountant", "Corporate & Commercial, Tax", "+254711000000", "john@example.com", todayISO(), "Coffee catch-up", todayISO(), "Good tax referral contact"],
+    ],
+    fieldOptions: [
+      { key: "", label: "Don't import this column" },
+      { key: "name", label: "Name" },
+      { key: "institution", label: "Affiliated organization / institution" },
+      { key: "type", label: "Type" },
+      { key: "practiceFed", label: "Practice fed (comma-separated)" },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "lastContact", label: "Last contact" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "notes", label: "Notes" },
+    ],
+    guessMapping: (key) => {
+      if (/name/.test(key)) return "name";
+      if (/institution|organi[sz]ation|firm|company/.test(key)) return "institution";
+      if (/type|profession|role/.test(key)) return "type";
+      if (/practice/.test(key)) return "practiceFed";
+      if (/phone|mobile|tel/.test(key)) return "phone";
+      if (/email/.test(key)) return "email";
+      if (/last.*contact/.test(key)) return "lastContact";
+      if (/next.*date|follow.*date/.test(key)) return "nextActionDate";
+      if (/next|follow/.test(key)) return "nextAction";
+      if (/note|comment/.test(key)) return "notes";
+      return "";
+    },
+    buildDefaults: (me) => ({ id: uid(), responsiblePartner: me, practiceFed: [], lastContact: todayISO(), nextAction: "", nextActionDate: "", notes: "", notesHistory: [] }),
+    applyField: (obj, key, value) => {
+      if (key === "practiceFed") obj.practiceFed = splitListValue(value);
+      else obj[key] = value;
+    },
+  },
+  resource: {
+    title: "Import resource people",
+    label: "resource person",
+    labelPlural: "resource people",
+    nameKey: "name",
+    templateName: "bideey-resource-people-template.csv",
+    sampleRows: [
+      ["name", "category", "institution", "useful_for", "phone", "email", "notes"],
+      ["Amina Otieno", "Specialist Advisor", "Independent", "Competition law opinions", "+254722000000", "amina@example.com", "Useful external specialist"],
+    ],
+    fieldOptions: [
+      { key: "", label: "Don't import this column" },
+      { key: "name", label: "Name" },
+      { key: "category", label: "Category" },
+      { key: "institution", label: "Institution" },
+      { key: "usefulFor", label: "What they're useful for" },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "notes", label: "Notes" },
+    ],
+    guessMapping: (key) => {
+      if (/name/.test(key)) return "name";
+      if (/categ/.test(key)) return "category";
+      if (/institution|organi[sz]ation|firm|company/.test(key)) return "institution";
+      if (/useful|expert|specialt|notes/.test(key)) return "usefulFor";
+      if (/phone|mobile|tel/.test(key)) return "phone";
+      if (/email/.test(key)) return "email";
+      return "";
+    },
+    buildDefaults: () => ({ id: uid(), category: RESOURCE_PEOPLE_CATEGORIES[0], notesHistory: [] }),
+    applyField: (obj, key, value) => {
+      if (key === "category") obj.category = matchChoice(value, RESOURCE_PEOPLE_CATEGORIES, RESOURCE_PEOPLE_CATEGORIES[0]);
+      else obj[key] = value;
+    },
+  },
+};
+
+const joinNotes = (r) => (r.notesHistory || []).map((n) => `${n.date}: ${n.text}`).join(" | ");
+const resolvePartnerName = (r, store) => store.partners.find((p) => p.id === r.responsiblePartner)?.name || "";
+const EXPORT_ENTITY_CONFIGS = {
+  prospect: {
+    filename: () => `bideey-leads-${todayISO()}.xlsx`,
+    rows: (store) => store.prospects,
+    columns: [
+      { key: "organization", label: "Organization / lead" },
+      { key: "contact", label: "Contact" },
+      { key: "contactEmail", label: "Email" },
+      { key: "contactPhone", label: "Phone" },
+      { key: "sector", label: "Sector" },
+      { key: "practiceArea", label: "Practice area" },
+      { key: "opportunity", label: "Opportunity" },
+      { key: "source", label: "Source" },
+      { key: "strength", label: "Relationship strength" },
+      { key: "status", label: "Status" },
+      { key: "responsiblePartner", label: "Responsible partner", resolve: resolvePartnerName },
+      { key: "estimatedValue", label: "Estimated value" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "notesHistory", label: "Notes", resolve: joinNotes },
+    ],
+  },
+  client: {
+    filename: () => `bideey-clients-${todayISO()}.xlsx`,
+    rows: (store) => store.clients,
+    columns: [
+      { key: "name", label: "Name" },
+      { key: "clientType", label: "Client type" },
+      { key: "contact", label: "Contact" },
+      { key: "position", label: "Position" },
+      { key: "sector", label: "Sector" },
+      { key: "contactPhone", label: "Phone" },
+      { key: "contactEmail", label: "Email" },
+      { key: "instructedOn", label: "Instructed on" },
+      { key: "potentialNeeds", label: "Possible need" },
+      { key: "responsiblePartner", label: "Responsible partner", resolve: resolvePartnerName },
+      { key: "origin", label: "Origin" },
+      { key: "lastContact", label: "Last contact" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "notesHistory", label: "Notes", resolve: joinNotes },
+    ],
+  },
+  referral: {
+    filename: () => `bideey-referral-partners-${todayISO()}.xlsx`,
+    rows: (store) => store.referrals,
+    columns: [
+      { key: "name", label: "Name" },
+      { key: "institution", label: "Institution" },
+      { key: "type", label: "Type" },
+      { key: "practiceFed", label: "Practice fed", resolve: (r) => (Array.isArray(r.practiceFed) ? r.practiceFed : [r.practiceFed].filter(Boolean)).join(", ") },
+      { key: "responsiblePartner", label: "Responsible partner", resolve: resolvePartnerName },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "lastContact", label: "Last contact" },
+      { key: "nextAction", label: "Next action" },
+      { key: "nextActionDate", label: "Next action date" },
+      { key: "notesHistory", label: "Notes", resolve: joinNotes },
+    ],
+  },
+  resource: {
+    filename: () => `bideey-resource-people-${todayISO()}.xlsx`,
+    rows: (store) => store.resourcePeople,
+    columns: [
+      { key: "name", label: "Name" },
+      { key: "category", label: "Category" },
+      { key: "institution", label: "Institution" },
+      { key: "usefulFor", label: "What they're useful for" },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "notesHistory", label: "Notes", resolve: joinNotes },
+    ],
+  },
+};
+
+async function exportEntityToXlsx(entityType, store) {
+  const config = EXPORT_ENTITY_CONFIGS[entityType];
+  const XLSX = await loadScript("https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js", "XLSX");
+  const data = config.rows(store).map((r) => {
+    const obj = {};
+    config.columns.forEach((col) => {
+      obj[col.label] = col.resolve ? col.resolve(r, store) : (r[col.key] ?? "");
+    });
+    return obj;
+  });
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+  XLSX.writeFile(wb, config.filename());
+}
+
 const monthKey = (d) => (d || todayISO()).slice(0, 7);
 const shiftMonthKey = (mk, delta) => {
   const [y, m] = mk.split("-").map(Number);
@@ -689,7 +1059,7 @@ function useStorage(activeFirmId) {
         };
         const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
         const defaultTargets = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.target]));
-        const defaultPartners = activeFirmId === DEFAULT_FIRM_ID ? DEFAULT_PARTNERS : [];
+        const defaultPartners = activeFirmId === "demo" ? DEMO_PARTNERS : activeFirmId === DEFAULT_FIRM_ID ? DEFAULT_PARTNERS : [];
         const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp] = await Promise.all([
           safe("kkn-partners", defaultPartners),
           safe("kkn-prospects", []),
@@ -837,6 +1207,11 @@ function useStorage(activeFirmId) {
         setPartners(next);
         persist("kkn-partners", next);
       },
+      updatePartnerExport: (partnerId, canExport) => {
+        const next = partners.map((p) => (p.id === partnerId ? { ...p, canExport } : p));
+        setPartners(next);
+        persist("kkn-partners", next);
+      },
       saveProspect: (p) => {
         const prev = prospects.find((x) => x.id === p.id);
         const exists = Boolean(prev);
@@ -887,6 +1262,15 @@ function useStorage(activeFirmId) {
         setProspects(next);
         persist("kkn-prospects", next);
       },
+      bulkImportProspects: (newProspects) => {
+        const stamped = newProspects.map((p) => ({ firmId: p.firmId || activeFirmId, ...p }));
+        const nextProspects = [...prospects, ...stamped];
+        const nextClients = ensureClientsForWonProspects(nextProspects, clients, activeFirmId);
+        setProspects(nextProspects);
+        setClients(nextClients);
+        persist("kkn-prospects", nextProspects);
+        persist("kkn-clients", nextClients);
+      },
       saveReferral: (r) => {
         const exists = referrals.some((x) => x.id === r.id);
         const next = exists
@@ -897,6 +1281,12 @@ function useStorage(activeFirmId) {
       },
       deleteReferral: (id) => {
         const next = referrals.filter((x) => x.id !== id);
+        setReferrals(next);
+        persist("kkn-referrals", next);
+      },
+      bulkImportReferrals: (newReferrals) => {
+        const stamped = newReferrals.map((r) => ({ firmId: r.firmId || activeFirmId, ...r }));
+        const next = [...referrals, ...stamped];
         setReferrals(next);
         persist("kkn-referrals", next);
       },
@@ -972,6 +1362,12 @@ function useStorage(activeFirmId) {
         setResourcePeople(next);
         persist("kkn-resource-people", next);
       },
+      bulkImportResourcePeople: (newPeople) => {
+        const stamped = newPeople.map((rp) => ({ firmId: rp.firmId || activeFirmId, ...rp }));
+        const next = [...resourcePeople, ...stamped];
+        setResourcePeople(next);
+        persist("kkn-resource-people", next);
+      },
       deleteResourcePerson: (id) => {
         const next = resourcePeople.filter((x) => x.id !== id);
         setResourcePeople(next);
@@ -1006,6 +1402,12 @@ function useStorage(activeFirmId) {
       saveClient: (c) => {
         const exists = clients.some((x) => x.id === c.id);
         const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, { firmId: c.firmId || activeFirmId, ...c }];
+        setClients(next);
+        persist("kkn-clients", next);
+      },
+      bulkImportClients: (newClients) => {
+        const stamped = newClients.map((c) => ({ firmId: c.firmId || activeFirmId, ...c }));
+        const next = [...clients, ...stamped];
         setClients(next);
         persist("kkn-clients", next);
       },
@@ -3746,9 +4148,11 @@ function ResourcePersonModal({ item, me, referrals, onSave, onDelete, onAddAsRef
   );
 }
 
-function ResourcePeoplePage({ store, me }) {
+function ResourcePeoplePage({ store, me, canExport }) {
   const [search, setSearch] = useState("");
   const [openPerson, setOpenPerson] = useState(undefined); // undefined=closed, null=new, obj=edit
+  const [importOpen, setImportOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const visible = store.resourcePeople.filter((rp) =>
     matchesSearch(search, [rp.name, rp.category, rp.institution, rp.usefulFor])
   );
@@ -3759,6 +4163,19 @@ function ResourcePeoplePage({ store, me }) {
         A directory, not a pipeline — specialists to call when a brief lands outside the firm's own expertise, and execution support (clerks, registry contacts) who help get existing work done. Nothing here carries a fee, a stage, or a responsible partner, and none of it feeds Insights — this is contacts, not revenue.
       </p>
       <SearchBox value={search} onChange={setSearch} placeholder="Search name, category, institution…" />
+      <div className="filter-row">
+        <button type="button" className="mini-btn" onClick={() => setImportOpen(true)}>📄 Import resource people</button>
+        {canExport && (
+          <button
+            type="button"
+            className="mini-btn"
+            disabled={exporting}
+            onClick={() => { setExporting(true); exportEntityToXlsx("resource", store).finally(() => setExporting(false)); }}
+          >
+            {exporting ? "Exporting…" : "⬇ Export resource people"}
+          </button>
+        )}
+      </div>
       <div className="card-list">
         {store.resourcePeople.length === 0 && <p className="empty">No resource people added yet.</p>}
         {visible.map((rp) => (
@@ -3777,6 +4194,15 @@ function ResourcePeoplePage({ store, me }) {
       <button className="btn btn-primary" style={{ marginTop: 14 }} onClick={() => setOpenPerson(null)}>
         + New resource person
       </button>
+      {importOpen && (
+        <ImportModal
+          entityType="resource"
+          existingItems={store.resourcePeople}
+          me={me}
+          onImport={store.bulkImportResourcePeople}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
       {openPerson !== undefined && (
         <ResourcePersonModal
           item={openPerson}
@@ -3854,7 +4280,10 @@ function TeamRolesPage({ store }) {
   return (
     <>
       <p className="insight-note">
-        Partners have full access. Admins can do the same day-to-day work — tenders, client and prospect data entry, logging Scorecard activity — but never see the Insights tab or partner-to-partner comparisons, so performance figures stay between partners. This is a UI-level restriction, not a hard security boundary.
+        Partners have full access. Office Admins can do the same day-to-day work — tenders, client and prospect data entry, logging Scorecard activity — but never see the Insights tab or partner-to-partner comparisons, so performance figures stay between partners. This is a UI-level restriction, not a hard security boundary.
+      </p>
+      <p className="insight-note">
+        Export access is separate from role. Turn it on only for people you trust with a spreadsheet copy of the firm's leads, clients, referral partners, and resource people.
       </p>
       <div className="cost-table">
         {store.partners.map((p) => (
@@ -3870,6 +4299,19 @@ function TeamRolesPage({ store }) {
         ))}
         {store.partners.length === 0 && <p className="empty">No one added yet.</p>}
       </div>
+      <div className="cost-table" style={{ marginTop: 14 }}>
+        {store.partners.map((p) => (
+          <label key={p.id} className="cost-row" style={{ cursor: "pointer" }}>
+            <span className="cost-row-label">{p.name} — can export data</span>
+            <input
+              type="checkbox"
+              checked={Boolean(p.canExport)}
+              onChange={(e) => store.updatePartnerExport(p.id, e.target.checked)}
+              style={{ width: 16, height: 16, accentColor: "var(--navy)" }}
+            />
+          </label>
+        ))}
+      </div>
     </>
   );
 }
@@ -3878,7 +4320,7 @@ function TeamRolesPage({ store }) {
 // own page rather than everything living flat on one screen.
 const SETTINGS_PAGES = [
   { key: "access", label: "Invite your people", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
-  { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs restricted admin access", Component: TeamRolesPage, partnerOnly: true },
+  { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs Office Admin access", Component: TeamRolesPage, partnerOnly: true },
   { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true },
   { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage, requiresAmounts: true },
   { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage },
@@ -3966,8 +4408,8 @@ function FirmAccessPage({ activeFirm }) {
         </Field>
         <Field label="Access level">
           <select value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="member">BD User</option>
-            <option value="admin">Partner / admin</option>
+            <option value="member">Office Admin</option>
+            <option value="admin">Partner</option>
           </select>
         </Field>
         <button className="btn btn-primary" type="submit" disabled={status === "saving"}>
@@ -3990,7 +4432,7 @@ function FirmAccessPage({ activeFirm }) {
   );
 }
 
-function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, initialPage = null, onClose }) {
+function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, canExport = false, initialPage = null, onClose }) {
   const [page, setPage] = useState(initialPage); // null = menu, or a SETTINGS_PAGES key
   const visiblePages = SETTINGS_PAGES.filter(
     (p) => (!p.requiresAmounts || permissions.seeAmounts) && (!p.partnerOnly || permissions.manageRoles)
@@ -4011,7 +4453,7 @@ function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, acti
         </div>
         <div className="sheet-body">
           {active ? (
-            <active.Component store={store} me={me} activeFirm={activeFirm} />
+            <active.Component store={store} me={me} activeFirm={activeFirm} canExport={canExport} />
           ) : (
             <div className="settings-menu">
               {visiblePages.map((p) => (
@@ -4066,7 +4508,7 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
   );
 }
 
-export default function App({ session, activeFirm, membershipRole, onSignOut }) {
+export default function App({ session, activeFirm, membershipRole, onSignOut, isDemo = false }) {
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
   const store = useStorage(activeFirmId);
   // iOS shrinks the *visible* area when the keyboard opens but leaves position:fixed elements
@@ -4116,6 +4558,10 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
   const [openReferral, setOpenReferral] = useState(undefined);
   const [openTender, setOpenTender] = useState(undefined);
   const [openClient, setOpenClient] = useState(undefined);
+  const [importProspectsOpen, setImportProspectsOpen] = useState(false);
+  const [importClientsOpen, setImportClientsOpen] = useState(false);
+  const [importReferralsOpen, setImportReferralsOpen] = useState(false);
+  const [exportingType, setExportingType] = useState(null);
   const [prospectPrefill, setProspectPrefill] = useState("");
   const [clientPrefill, setClientPrefill] = useState("");
   const [referralPrefill, setReferralPrefill] = useState("");
@@ -4170,6 +4616,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
   const sessionUserEmail = session?.user?.email || "";
   const currentUserPartnerId = sessionUserId ? `user-${sessionUserId}` : "";
   const currentUserAppRole = membershipRoleToAppRole(membershipRole);
+  const demoLoadedRef = useRef(false);
 
   useEffect(() => {
     if (!store.ready || !sessionUserId || me) return;
@@ -4191,11 +4638,21 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
       userId: sessionUserId,
       email: sessionUserEmail,
       name: displayNameFromSession(session),
-      identity: currentUserAppRole === "admin" ? "BD User" : "Partner / admin",
+      identity: currentUserAppRole === "admin" ? "Office Admin" : "Partner",
       role: currentUserAppRole,
+      canExport: currentUserAppRole === "partner",
     });
     setMe(currentUserPartnerId);
   }, [currentUserAppRole, currentUserPartnerId, me, session, sessionUserEmail, sessionUserId, store]);
+
+  useEffect(() => {
+    if (!isDemo || !store.ready || demoLoadedRef.current) return;
+    const hasDemoData = store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length;
+    if (!hasDemoData) {
+      demoLoadedRef.current = true;
+      store.loadSampleData();
+    }
+  }, [isDemo, store]);
 
   if (!store.ready) {
     return (
@@ -4222,6 +4679,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
 
   const myPartner = store.partners.find((p) => p.id === me);
   const myPermissions = getPermissions(myPartner);
+  const canExport = Boolean(myPartner?.canExport || isDemo);
   const visibleProspects = store.prospects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
@@ -4259,6 +4717,11 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
   return (
     <div className="app">
       <Style />
+      {isDemo && (
+        <div className="demo-banner">
+          Demo playground — fictional data only. Changes are saved in this browser and never touch a real firm workspace.
+        </div>
+      )}
       <header className="topbar">
         <button className="brand" onClick={() => setTab("reminders")} aria-label="Go to home">
           <span className="brand-icon brand-letter" aria-hidden="true">B</span>
@@ -4271,9 +4734,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
             </button>
           )}
           <button className="notif-bell" onClick={() => openSettings()} aria-label="Settings">⚙️</button>
-          <button className="me-name" onClick={() => setMe(null)}>
+          <span className="me-name">
             {myPartner?.name || "Switch"}
-          </button>
+          </span>
           <button className="signout-btn" onClick={onSignOut}>Sign out</button>
         </div>
       </header>
@@ -4296,6 +4759,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
           permissions={myPermissions}
           me={me}
           activeFirm={activeFirm}
+          canExport={canExport}
           initialPage={settingsInitialPage}
           onClose={() => setSettingsOpen(false)}
         />
@@ -4345,6 +4809,17 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            )}
+            <button type="button" className="mini-btn" onClick={() => setImportProspectsOpen(true)}>📄 Import leads</button>
+            {canExport && (
+              <button
+                type="button"
+                className="mini-btn"
+                disabled={exportingType === "prospect"}
+                onClick={() => { setExportingType("prospect"); exportEntityToXlsx("prospect", store).finally(() => setExportingType(null)); }}
+              >
+                {exportingType === "prospect" ? "Exporting…" : "⬇ Export leads"}
+              </button>
             )}
             {myPermissions.seeMetrics && (
               <span className="list-count">{visibleProspectCount} prospect{visibleProspectCount === 1 ? "" : "s"}</span>
@@ -4530,6 +5005,17 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
                 ))}
               </select>
             )}
+            <button type="button" className="mini-btn" onClick={() => setImportClientsOpen(true)}>📄 Import clients</button>
+            {canExport && (
+              <button
+                type="button"
+                className="mini-btn"
+                disabled={exportingType === "client"}
+                onClick={() => { setExportingType("client"); exportEntityToXlsx("client", store).finally(() => setExportingType(null)); }}
+              >
+                {exportingType === "client" ? "Exporting…" : "⬇ Export clients"}
+              </button>
+            )}
             {myPermissions.seeMetrics && (
               <span className="list-count">{visibleClients.length} client{visibleClients.length === 1 ? "" : "s"}</span>
             )}
@@ -4595,6 +5081,17 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            )}
+            <button type="button" className="mini-btn" onClick={() => setImportReferralsOpen(true)}>📄 Import referral partners</button>
+            {canExport && (
+              <button
+                type="button"
+                className="mini-btn"
+                disabled={exportingType === "referral"}
+                onClick={() => { setExportingType("referral"); exportEntityToXlsx("referral", store).finally(() => setExportingType(null)); }}
+              >
+                {exportingType === "referral" ? "Exporting…" : "⬇ Export referral partners"}
+              </button>
             )}
             {myPermissions.seeMetrics && (
               <span className="list-count">{visibleReferrals.length} referral partner{visibleReferrals.length === 1 ? "" : "s"}</span>
@@ -4694,6 +5191,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
         />
       )}
 
+      {importProspectsOpen && (
+        <ImportModal
+          entityType="prospect"
+          existingItems={store.prospects}
+          me={me}
+          onImport={store.bulkImportProspects}
+          onClose={() => setImportProspectsOpen(false)}
+        />
+      )}
+
       {openClient !== undefined && (
         <ClientModal
           item={openClient}
@@ -4720,6 +5227,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
         />
       )}
 
+      {importClientsOpen && (
+        <ImportModal
+          entityType="client"
+          existingItems={store.clients}
+          me={me}
+          onImport={store.bulkImportClients}
+          onClose={() => setImportClientsOpen(false)}
+        />
+      )}
+
       {openReferral !== undefined && (
         <ReferralModal
           item={openReferral}
@@ -4734,6 +5251,16 @@ export default function App({ session, activeFirm, membershipRole, onSignOut }) 
           onClose={() => { setOpenReferral(undefined); setReferralPrefill(""); }}
           markSeen={store.markReferralSeen}
           getDayLoad={getDayLoad}
+        />
+      )}
+
+      {importReferralsOpen && (
+        <ImportModal
+          entityType="referral"
+          existingItems={store.referrals}
+          me={me}
+          onImport={store.bulkImportReferrals}
+          onClose={() => setImportReferralsOpen(false)}
         />
       )}
 
@@ -5106,6 +5633,206 @@ function WatchlistPanel({ store, me, setOpenProspect, setProspectPrefill }) {
         </div>
       )}
     </section>
+  );
+}
+
+function ImportModal({ entityType, existingItems, me, onImport, onClose }) {
+  const config = IMPORT_ENTITY_CONFIGS[entityType];
+  const [stage, setStage] = useState("upload");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [fileName, setFileName] = useState("");
+  const [rawRows, setRawRows] = useState(null);
+  const [mapping, setMapping] = useState({});
+  const [imported, setImported] = useState(0);
+
+  const handleFile = async (file) => {
+    setError("");
+    setLoading(true);
+    setFileName(file.name);
+    try {
+      const ext = file.name.split(".").pop().toLowerCase();
+      if (!["xlsx", "xls", "csv"].includes(ext)) {
+        setError("Unsupported file type. Please upload a .csv, .xlsx, or .xls file.");
+        setLoading(false);
+        return;
+      }
+      let rows = await parseSpreadsheetFile(file);
+      rows = rows.filter((r) => r.some((cell) => String(cell || "").trim()));
+      if (rows.length < 2) {
+        setError("Couldn't find any data rows below the header row.");
+        setLoading(false);
+        return;
+      }
+      const guess = {};
+      rows[0].forEach((h, i) => {
+        const guessed = config.guessMapping(normalizeImportKey(h));
+        if (guessed) guess[i] = guessed;
+      });
+      setMapping(guess);
+      setRawRows(rows);
+      setStage("mapping");
+    } catch (e) {
+      setError("Couldn't read that file — " + (e.message || "it may be corrupted or in an unsupported format."));
+    }
+    setLoading(false);
+  };
+
+  const headers = useMemo(() => (rawRows ? rawRows[0] : []), [rawRows]);
+  const dataRows = useMemo(() => (rawRows ? rawRows.slice(1) : []), [rawRows]);
+  const nameColIndex = Object.keys(mapping).find((i) => mapping[i] === config.nameKey);
+
+  const preview = useMemo(() => {
+    if (!rawRows || nameColIndex === undefined) return null;
+    const existingNames = new Set((existingItems || []).map((item) => (item[config.nameKey] || "").trim().toLowerCase()));
+    const toCreate = [];
+    const skippedNoName = [];
+    const skippedDuplicate = [];
+
+    dataRows.forEach((row) => {
+      const obj = config.buildDefaults(me);
+      Object.entries(mapping).forEach(([colIdx, fieldKey]) => {
+        if (!fieldKey) return;
+        config.applyField(obj, fieldKey, (row[colIdx] || "").toString().trim());
+      });
+      if (obj.notes && !(obj.notesHistory || []).length) {
+        obj.notesHistory = [{ date: todayISO(), text: obj.notes, partnerId: me || null }];
+      }
+      if (!obj[config.nameKey]) {
+        skippedNoName.push(row);
+        return;
+      }
+      if (existingNames.has(obj[config.nameKey].trim().toLowerCase())) {
+        skippedDuplicate.push(obj[config.nameKey]);
+        return;
+      }
+      toCreate.push(obj);
+    });
+
+    return { toCreate, skippedNoName, skippedDuplicate };
+  }, [config, dataRows, existingItems, mapping, me, nameColIndex, rawRows]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-head">
+          <h3>{config.title}</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="sheet-body">
+          {stage === "upload" && (
+            <>
+              <p className="insight-note">
+                Upload a spreadsheet of your existing {config.labelPlural}. You will map the columns and preview exactly what will be created before anything is saved.
+              </p>
+              <div className="filter-row" style={{ marginTop: 10 }}>
+                <button type="button" className="mini-btn" onClick={() => downloadCsv(config.templateName, config.sampleRows)}>
+                  ⬇ Download sample CSV
+                </button>
+              </div>
+              <label className="voice-fill-trigger" style={{ display: "block", textAlign: "center", cursor: "pointer" }}>
+                {loading ? "Reading file…" : "📄 Choose a file to import"}
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  style={{ display: "none" }}
+                  onChange={(e) => e.target.files[0] && handleFile(e.target.files[0])}
+                  disabled={loading}
+                />
+              </label>
+              {error && <p className="save-error">⚠️ {error}</p>}
+              <p className="insight-note" style={{ marginTop: 10 }}>
+                Start from the sample CSV if you want the fastest path. Missing optional details are fine; you can fill them in later.
+              </p>
+            </>
+          )}
+
+          {stage === "mapping" && rawRows && (
+            <>
+              <p className="insight-note">
+                Match each column in <strong>{fileName}</strong> to the right Bideey field. The name column is required.
+              </p>
+              {headers.map((h, i) => (
+                <div className="row2" key={i}>
+                  <Field label={`Column: "${h || `Column ${i + 1}`}"`}>
+                    <input value={dataRows[0]?.[i] || ""} disabled />
+                  </Field>
+                  <Field label="Maps to">
+                    <select value={mapping[i] || ""} onChange={(e) => setMapping({ ...mapping, [i]: e.target.value })}>
+                      {config.fieldOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                    </select>
+                  </Field>
+                </div>
+              ))}
+              {nameColIndex === undefined && <p className="save-error">⚠️ Map one column to the required name field to continue.</p>}
+              <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+                <button className="btn btn-ghost" onClick={() => { setStage("upload"); setRawRows(null); }}>← Choose a different file</button>
+                <button className="btn btn-primary" disabled={nameColIndex === undefined} onClick={() => setStage("preview")}>
+                  Review {dataRows.length} rows →
+                </button>
+              </div>
+            </>
+          )}
+
+          {stage === "preview" && preview && (
+            <>
+              <div className="stat-grid" style={{ marginBottom: 14 }}>
+                <div className="stat">
+                  <span className="stat-value">{preview.toCreate.length}</span>
+                  <span className="stat-label">New {config.labelPlural} will be created</span>
+                </div>
+                <div className="stat">
+                  <span className="stat-value">{preview.skippedDuplicate.length}</span>
+                  <span className="stat-label">Duplicates skipped</span>
+                </div>
+              </div>
+              {preview.skippedNoName.length > 0 && (
+                <p className="insight-note">{preview.skippedNoName.length} row{preview.skippedNoName.length === 1 ? "" : "s"} had no name and will be skipped.</p>
+              )}
+              {preview.skippedDuplicate.length > 0 && (
+                <p className="insight-note">
+                  Already in Bideey: {preview.skippedDuplicate.slice(0, 6).join(", ")}{preview.skippedDuplicate.length > 6 ? `, +${preview.skippedDuplicate.length - 6} more` : ""}.
+                </p>
+              )}
+              <div className="history-list">
+                {preview.toCreate.slice(0, 8).map((item) => (
+                  <div key={item.id} className="note-row">
+                    <div className="note-text">{item[config.nameKey]}</div>
+                    <div className="history-meta">
+                      {[item.organization, item.institution, item.sector, item.contact, item.contactEmail, item.email].filter((x) => x && x !== item[config.nameKey]).join(" · ") || "No other details on this row"}
+                    </div>
+                  </div>
+                ))}
+                {preview.toCreate.length > 8 && <p className="insight-note">+{preview.toCreate.length - 8} more…</p>}
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+                <button className="btn btn-ghost" onClick={() => setStage("mapping")}>← Back to mapping</button>
+                <button
+                  className="btn btn-primary"
+                  disabled={preview.toCreate.length === 0}
+                  onClick={() => {
+                    onImport(preview.toCreate);
+                    setImported(preview.toCreate.length);
+                    setStage("done");
+                  }}
+                >
+                  Import {preview.toCreate.length} {preview.toCreate.length === 1 ? config.label : config.labelPlural}
+                </button>
+              </div>
+            </>
+          )}
+
+          {stage === "done" && (
+            <>
+              <p className="insight-note">
+                ✓ {imported} {imported === 1 ? config.label : config.labelPlural} imported. You can fill in anything missing from each record later.
+              </p>
+              <button className="btn btn-primary" onClick={onClose}>Done</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -6197,6 +6924,7 @@ export function Style() {
       .role-help-text{ display:block; font-size:11px; color:var(--muted); font-weight:500; margin-top:2px; }
       .fine{ font-size:11.5px; color:var(--muted); margin-top:18px; }
 
+      .demo-banner{ background:#fff4d6; color:#5f3b00; border-bottom:1px solid #ead39d; padding:8px 16px; text-align:center; font-size:12.5px; font-weight:800; }
       .topbar{ position:sticky; top:0; z-index:5; background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; }
       .brand{ display:flex; align-items:center; gap:8px; background:none; border:none; padding:0; cursor:pointer; text-align:left; }
       .brand-icon{ width:28px; height:28px; display:grid; place-items:center; }

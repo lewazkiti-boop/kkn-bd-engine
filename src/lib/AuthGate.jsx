@@ -3,6 +3,16 @@ import { supabase } from "./supabaseClient";
 import { configureStorageContext } from "./storagePolyfill";
 import Login from "../Login";
 
+const isDemoMode = import.meta.env.VITE_APP_MODE === "demo";
+const demoSession = {
+  user: {
+    id: "demo-user",
+    email: "demo@bideey.com",
+    user_metadata: { name: "Demo Partner" },
+  },
+};
+const demoFirm = { id: "demo", name: "Bideey Demo Firm", slug: "demo" };
+
 // Wraps the app: shows the magic-link login screen until there's an authenticated
 // Supabase session, then renders children (passing a signOut callback down).
 export default function AuthGate({ children }) {
@@ -34,6 +44,7 @@ export default function AuthGate({ children }) {
   };
 
   useEffect(() => {
+    if (isDemoMode) return undefined;
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
@@ -42,6 +53,7 @@ export default function AuthGate({ children }) {
   }, []);
 
   useEffect(() => {
+    if (isDemoMode) return undefined;
     if (!session) {
       configureStorageContext();
       setMemberships(undefined);
@@ -95,6 +107,17 @@ export default function AuthGate({ children }) {
       cancelled = true;
     };
   }, [session, inviteToken, refreshKey]);
+
+  if (isDemoMode) {
+    configureStorageContext({ firmId: demoFirm.id, userId: demoSession.user.id });
+    return children({
+      session: demoSession,
+      activeFirm: demoFirm,
+      membershipRole: "admin",
+      signOut: () => window.location.reload(),
+      isDemo: true,
+    });
+  }
 
   const signOut = async () => {
     configureStorageContext();

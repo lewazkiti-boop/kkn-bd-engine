@@ -76,7 +76,7 @@ $html = '
     <tr><td><strong>Firm / organisation</strong></td><td>' . escape_html($firmName) . '</td></tr>
     <tr><td><strong>Country</strong></td><td>' . escape_html($country) . '</td></tr>
     <tr><td><strong>Role</strong></td><td>' . escape_html($role) . '</td></tr>
-    <tr><td><strong>Number of partners / BD users</strong></td><td>' . escape_html($teamSize) . '</td></tr>
+    <tr><td><strong>Number of partners / Office Admins</strong></td><td>' . escape_html($teamSize) . '</td></tr>
     <tr><td><strong>Current tracking method</strong></td><td>' . escape_html($currentMethod ?: 'Not provided') . '</td></tr>
     <tr><td><strong>Biggest BD challenge</strong></td><td>' . nl2br(escape_html($challenge)) . '</td></tr>
     <tr><td><strong>Optional message</strong></td><td>' . nl2br(escape_html($message ?: 'Not provided')) . '</td></tr>
@@ -90,7 +90,7 @@ $text = "New Bideey product walkthrough request\n\n"
     . "Firm / organisation: {$firmName}\n"
     . "Country: {$country}\n"
     . "Role: {$role}\n"
-    . "Number of partners / BD users: {$teamSize}\n"
+    . "Number of partners / Office Admins: {$teamSize}\n"
     . "Current tracking method: " . ($currentMethod ?: 'Not provided') . "\n"
     . "Biggest BD challenge: {$challenge}\n"
     . "Optional message: " . ($message ?: 'Not provided') . "\n";
