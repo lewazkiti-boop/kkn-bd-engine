@@ -1060,19 +1060,6 @@ function useStorage(activeFirmId) {
   const [nextActionTemplates, setNextActionTemplates] = useState(DEFAULT_NEXT_ACTION_TEMPLATES);
   const [resourcePeople, setResourcePeople] = useState([]);
   const [sharedDemoHelperState, setSharedDemoHelperState] = useState({});
-  const disableDemoHelperForRealData = useCallback(() => {
-    const state = { active: false, disabled: true, disabledAt: Date.now() };
-    try {
-      window.localStorage.setItem(`bideey-demo-helper-${activeFirmId}`, JSON.stringify(state));
-      window.localStorage.removeItem(`bideey-demo-backup-${activeFirmId}`);
-      window.localStorage.removeItem(`bideey-demo-reload-count-${activeFirmId}`);
-    } catch {
-      // Ignore private browsing/local storage edge cases.
-    }
-    setSharedDemoHelperState(state);
-    Promise.resolve(window.storage?.set("kkn-demo-helper-state", JSON.stringify(state))).catch(() => {});
-    window.dispatchEvent(new CustomEvent("bideey-demo-helper-state-change", { detail: { firmId: activeFirmId, state } }));
-  }, [activeFirmId]);
 
   useEffect(() => {
     (async () => {
@@ -1245,7 +1232,6 @@ function useStorage(activeFirmId) {
       saveProspect: (p) => {
         const prev = prospects.find((x) => x.id === p.id);
         const exists = Boolean(prev);
-        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? prospects.map((x) => (x.id === p.id ? p : x))
           : [...prospects, { firmId: p.firmId || activeFirmId, ...p }];
@@ -1294,7 +1280,6 @@ function useStorage(activeFirmId) {
         persist("kkn-prospects", next);
       },
       bulkImportProspects: (newProspects) => {
-        if (newProspects.length) disableDemoHelperForRealData();
         const stamped = newProspects.map((p) => ({ firmId: p.firmId || activeFirmId, ...p }));
         const nextProspects = [...prospects, ...stamped];
         const nextClients = ensureClientsForWonProspects(nextProspects, clients, activeFirmId);
@@ -1305,7 +1290,6 @@ function useStorage(activeFirmId) {
       },
       saveReferral: (r) => {
         const exists = referrals.some((x) => x.id === r.id);
-        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? referrals.map((x) => (x.id === r.id ? r : x))
           : [...referrals, { firmId: r.firmId || activeFirmId, ...r }];
@@ -1318,14 +1302,12 @@ function useStorage(activeFirmId) {
         persist("kkn-referrals", next);
       },
       bulkImportReferrals: (newReferrals) => {
-        if (newReferrals.length) disableDemoHelperForRealData();
         const stamped = newReferrals.map((r) => ({ firmId: r.firmId || activeFirmId, ...r }));
         const next = [...referrals, ...stamped];
         setReferrals(next);
         persist("kkn-referrals", next);
       },
       logActivity: (partnerId, type, subject, cost) => {
-        disableDemoHelperForRealData();
         const next = [...activity, { id: uid(), firmId: activeFirmId, partnerId, type, date: todayISO(), subject: subject || "", cost: Number(cost) || 0 }];
         setActivity(next);
         persist("kkn-activity", next);
@@ -1392,7 +1374,6 @@ function useStorage(activeFirmId) {
       demoHelperState: sharedDemoHelperState,
       saveResourcePerson: (rp) => {
         const exists = resourcePeople.some((x) => x.id === rp.id);
-        if (!exists) disableDemoHelperForRealData();
         const next = exists
           ? resourcePeople.map((x) => (x.id === rp.id ? rp : x))
           : [...resourcePeople, { firmId: rp.firmId || activeFirmId, ...rp }];
@@ -1400,7 +1381,6 @@ function useStorage(activeFirmId) {
         persist("kkn-resource-people", next);
       },
       bulkImportResourcePeople: (newPeople) => {
-        if (newPeople.length) disableDemoHelperForRealData();
         const stamped = newPeople.map((rp) => ({ firmId: rp.firmId || activeFirmId, ...rp }));
         const next = [...resourcePeople, ...stamped];
         setResourcePeople(next);
@@ -1423,7 +1403,6 @@ function useStorage(activeFirmId) {
       },
       saveTender: (t) => {
         const exists = tenders.some((x) => x.id === t.id);
-        if (!exists) disableDemoHelperForRealData();
         const next = exists ? tenders.map((x) => (x.id === t.id ? t : x)) : [...tenders, { firmId: t.firmId || activeFirmId, ...t }];
         setTenders(next);
         persist("kkn-tenders", next);
@@ -1440,13 +1419,11 @@ function useStorage(activeFirmId) {
       },
       saveClient: (c) => {
         const exists = clients.some((x) => x.id === c.id);
-        if (!exists) disableDemoHelperForRealData();
         const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, { firmId: c.firmId || activeFirmId, ...c }];
         setClients(next);
         persist("kkn-clients", next);
       },
       bulkImportClients: (newClients) => {
-        if (newClients.length) disableDemoHelperForRealData();
         const stamped = newClients.map((c) => ({ firmId: c.firmId || activeFirmId, ...c }));
         const next = [...clients, ...stamped];
         setClients(next);
@@ -1459,13 +1436,14 @@ function useStorage(activeFirmId) {
       },
       loadSampleData: async () => {
         const sample = buildSampleData();
-        const stamp = (items) => items.map((item) => ({ ...item, firmId: activeFirmId }));
+        const stamp = (items) => items.map((item) => ({ ...item, firmId: activeFirmId, demoSample: true }));
         const sampleProspects = stamp(sample.prospects);
         const sampleReferrals = stamp(sample.referrals);
         const sampleClients = stamp(sample.clients);
         const sampleTenders = stamp(sample.tenders);
         const sampleActivity = stamp(sample.activity);
-        const reconciledClients = ensureClientsForWonProspects(sampleProspects, sampleClients, activeFirmId);
+        const reconciledClients = ensureClientsForWonProspects(sampleProspects, sampleClients, activeFirmId)
+          .map((client) => ({ ...client, firmId: activeFirmId, demoSample: true }));
         setReferrals(sampleReferrals);
         setClients(reconciledClients);
         setTenders(sampleTenders);
@@ -1497,6 +1475,34 @@ function useStorage(activeFirmId) {
           persist("kkn-activity", []),
         ]);
       },
+      clearSampleData: async (snapshot = {}) => {
+        const mergeBackupAndReal = (currentItems = [], backupItems = []) => {
+          const merged = new Map();
+          (backupItems || []).forEach((item) => merged.set(item.id || uid(), item));
+          (currentItems || []).filter((item) => !item.demoSample).forEach((item) => merged.set(item.id || uid(), item));
+          return [...merged.values()];
+        };
+        const nextReferrals = mergeBackupAndReal(referrals, snapshot.referrals);
+        const nextClients = mergeBackupAndReal(clients, snapshot.clients);
+        const nextTenders = mergeBackupAndReal(tenders, snapshot.tenders);
+        const nextProspects = mergeBackupAndReal(prospects, snapshot.prospects);
+        const nextActivity = mergeBackupAndReal(activity, snapshot.activity);
+        const nextVault = snapshot.vault || {};
+        setReferrals(nextReferrals);
+        setClients(nextClients);
+        setTenders(nextTenders);
+        setVault(nextVault);
+        setProspects(nextProspects);
+        setActivity(nextActivity);
+        await Promise.all([
+          persist("kkn-referrals", nextReferrals),
+          persist("kkn-clients", nextClients),
+          persist("kkn-tenders", nextTenders),
+          persist("kkn-tender-vault", nextVault),
+          persist("kkn-prospects", nextProspects),
+          persist("kkn-activity", nextActivity),
+        ]);
+      },
       restoreDataSnapshot: async (snapshot = {}) => {
         const nextReferrals = snapshot.referrals || [];
         const nextClients = snapshot.clients || [];
@@ -1520,7 +1526,7 @@ function useStorage(activeFirmId) {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, sharedDemoHelperState, activeFirmId, persist, disableDemoHelperForRealData]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, sharedDemoHelperState, activeFirmId, persist]
   );
 
   return { ready, error, ...api };
@@ -4762,7 +4768,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   }, [demoHelperState, demoHelperKey, demoReloadCountKey, isDemo]);
 
   useEffect(() => {
-    if (!sharedDemoHelperState?.disabled) return;
+    if (!sharedDemoHelperState?.disabled && !sharedDemoHelperState?.active) return;
     setDemoHelperState(sharedDemoHelperState);
     setDemoHelperNow(Date.now());
   }, [sharedDemoHelperState]);
@@ -4829,7 +4835,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       backup = null;
     }
     if (backup) {
-      await store.restoreDataSnapshot(backup);
+      await store.clearSampleData(backup);
+    } else if (demoHelperState.active) {
+      await store.clearSampleData({});
     } else {
       await store.clearAllData();
     }
@@ -4918,7 +4926,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
   const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
-  const shouldShowDemoHelper = !isDemo && !demoHelperState.disabled && demoHelperNow >= (demoHelperState.remindAt || demoHelperVisibleFrom);
+  const isFirmOwner = membershipRole === "owner";
+  const shouldShowDemoHelper = isFirmOwner && !isDemo && !demoHelperState.disabled && demoHelperNow >= (demoHelperState.remindAt || demoHelperVisibleFrom);
   const visibleProspects = store.prospects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
