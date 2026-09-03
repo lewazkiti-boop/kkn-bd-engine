@@ -4385,7 +4385,7 @@ function TeamRolesPage({ store }) {
   );
 }
 
-function DemoDataSettingsPage({ demoActive, onLoadDemoData, onClearDemoData }) {
+function DemoDataSettingsPage({ demoActive, onLoadDemoData, onClearDemoData, onClearAllData }) {
   return (
     <>
       <p className="insight-note">
@@ -4407,9 +4407,12 @@ function DemoDataSettingsPage({ demoActive, onLoadDemoData, onClearDemoData }) {
         <button type="button" className="btn btn-ghost" onClick={onClearDemoData}>
           Clear demo data
         </button>
+        <button type="button" className="btn btn-danger" onClick={onClearAllData}>
+          Clear all data
+        </button>
       </div>
       <p className="fine">
-        Clearing demo data removes records marked as sample data and keeps real records added afterwards where possible.
+        Clear demo data removes records marked as sample data and keeps real records added afterwards where possible. Clear all data wipes the workspace records for testing resets.
       </p>
     </>
   );
@@ -4532,7 +4535,7 @@ function FirmAccessPage({ activeFirm }) {
   );
 }
 
-function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, canExport = false, isFirmOwner = false, demoActive = false, onLoadDemoData, onClearDemoData, initialPage = null, onClose }) {
+function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, canExport = false, isFirmOwner = false, demoActive = false, onLoadDemoData, onClearDemoData, onClearAllData, initialPage = null, onClose }) {
   const [page, setPage] = useState(initialPage); // null = menu, or a SETTINGS_PAGES key
   const visiblePages = SETTINGS_PAGES.filter(
     (p) => (!p.requiresAmounts || permissions.seeAmounts) && (!p.partnerOnly || permissions.manageRoles) && (!p.ownerOnly || isFirmOwner)
@@ -4561,6 +4564,7 @@ function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, acti
               demoActive={demoActive}
               onLoadDemoData={onLoadDemoData}
               onClearDemoData={onClearDemoData}
+              onClearAllData={onClearAllData}
             />
           ) : (
             <div className="settings-menu">
@@ -4616,7 +4620,7 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
   );
 }
 
-function DemoDataHelper({ active, hasData, readyAfterReloads, onLoadSample, onClearSample, onRemindLater, onClose }) {
+function DemoDataHelper({ active, hasData, readyAfterReloads, onLoadSample, onClearSample, onClearAll, onRemindLater, onClose }) {
   return (
     <aside className="demo-helper" aria-label="Demo data helper">
       <div className="demo-helper-copy">
@@ -4638,6 +4642,7 @@ function DemoDataHelper({ active, hasData, readyAfterReloads, onLoadSample, onCl
         {active ? (
           <>
             <button type="button" className="btn btn-primary" onClick={onClearSample}>Clear demo data</button>
+            <button type="button" className="btn btn-danger" onClick={onClearAll}>Clear all data</button>
             <button type="button" className="btn btn-ghost" onClick={onRemindLater}>Remind me later</button>
           </>
         ) : (
@@ -4909,6 +4914,22 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     saveDemoHelperState(next);
     saveDemoClearPromptState({ visits: 0, clearedAt: Date.now() });
   };
+  const clearDashboardAllData = async () => {
+    const confirmed = window.confirm(
+      "Clear all workspace data? This removes leads, clients, referral partners, tenders, tender checklist items, and BD activity logs for this firm."
+    );
+    if (!confirmed) return;
+    await store.clearAllData();
+    try {
+      window.localStorage.removeItem(demoBackupKey);
+    } catch {
+      // Ignore private browsing/local storage edge cases.
+    }
+    const next = { active: false, clearedAt: Date.now(), clearedAllAt: Date.now() };
+    Promise.resolve(window.storage?.set("kkn-demo-helper-state", JSON.stringify(next))).catch(() => {});
+    saveDemoHelperState(next);
+    saveDemoClearPromptState({ visits: 0, clearedAllAt: Date.now() });
+  };
   const remindDemoHelperLater = () => {
     if (demoHelperState.active) {
       saveDemoClearPromptState({ ...demoClearPromptState, dismissedAtVisit: demoClearPromptState.visits || 0 });
@@ -5095,6 +5116,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           demoActive={Boolean(demoHelperState.active)}
           onLoadDemoData={loadDashboardSampleData}
           onClearDemoData={clearDashboardSampleData}
+          onClearAllData={clearDashboardAllData}
           initialPage={settingsInitialPage}
           onClose={() => setSettingsOpen(false)}
         />
@@ -5107,6 +5129,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           readyAfterReloads={shouldShowDemoClearReminder}
           onLoadSample={loadDashboardSampleData}
           onClearSample={clearDashboardSampleData}
+          onClearAll={clearDashboardAllData}
           onRemindLater={remindDemoHelperLater}
           onClose={remindDemoHelperLater}
         />
