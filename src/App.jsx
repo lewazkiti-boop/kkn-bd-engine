@@ -74,14 +74,20 @@ const DEMO_PARTNERS = [
 // figures out of the screens someone doesn't need, without pretending to be adversarial security.
 // Adding a new access level later (e.g. a partial-access admin) is just a new key here — nothing
 // else in the app needs to change, since every gate below checks a permission flag, not a role name.
-const ROLE_LABELS = { partner: "Partner", admin: "Office Admin" };
+const ROLE_LABELS = { partner: "Partner", admin: "Office Admin", salesrep: "Sales Rep" };
 const ROLE_HELP = {
   partner: "Full access — pipeline, tenders, clients, referrals, Scorecard, and Insights.",
   admin: "Adds and updates records — clients, tenders, prospects, referrals — without seeing money, performance figures, or partner-by-partner views. Can't filter by partner either.",
+  salesrep: "For people bringing in work who aren't firm staff — sees only their own pipeline, tenders, and performance. A client or referral partner is visible to them only once they've personally logged work against it, and even then only their own contribution, never the client's full history with the firm. Sets their own targets rather than the firm-wide ones.",
 };
 const ROLE_PERMISSIONS = {
-  partner: { seeInsights: true, seeScorecardByPartner: true, seeAmounts: true, seeMetrics: true, usePartnerFilters: true, manageRoles: true },
-  admin: { seeInsights: false, seeScorecardByPartner: false, seeAmounts: false, seeMetrics: false, usePartnerFilters: false, manageRoles: false },
+  partner: { seeInsights: true, seeScorecardByPartner: true, seeAmounts: true, seeMetrics: true, usePartnerFilters: true, manageRoles: true, scopedToSelf: false },
+  admin: { seeInsights: false, seeScorecardByPartner: false, seeAmounts: false, seeMetrics: false, usePartnerFilters: false, manageRoles: false, scopedToSelf: false },
+  // scopedToSelf is the one flag every other permission check ignores — it doesn't hide a feature,
+  // it narrows *which records* populate every list and total before any of those other flags ever
+  // get evaluated. See the REP DATA SCOPING note near visibleProspects in App() for exactly where
+  // that filtering happens.
+  salesrep: { seeInsights: true, seeScorecardByPartner: false, seeAmounts: true, seeMetrics: true, usePartnerFilters: false, manageRoles: false, scopedToSelf: true },
 };
 const getPermissions = (partner) => ROLE_PERMISSIONS[partner?.role] || ROLE_PERMISSIONS.partner;
 const membershipRoleToAppRole = (role) => (role === "member" ? "admin" : "partner");
@@ -161,7 +167,7 @@ const RESOURCE_PEOPLE_CATEGORIES = ["Specialist Advisor", "Execution Support"];
 //     typed on real records, the same way Occupation and Organization already work — but capped to
 //     a length that's plausibly a reusable phrase, so a one-off bespoke paragraph about a specific
 //     situation never becomes a suggestion, and never touches the curated list in #1 either way.
-const NEXT_ACTION_TYPE_LABELS = { prospect: "Prospects", client: "Clients", tender: "Tenders", referral: "Referral Partners" };
+const nextActionTypeLabel = (type) => (type === "tender" ? term("tenders") : ({ prospect: "Prospects", client: "Clients", referral: "Referral Partners" }[type] || type));
 const DEFAULT_NEXT_ACTION_TEMPLATES = {
   prospect: [
     "Send introductory email",
@@ -764,11 +770,88 @@ const buildMonthGrid = (mk) => {
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
   return weeks;
 };
-const fmtKES = (n) => (n ? `KES ${Number(n).toLocaleString()}` : "—");
+// Region settings — one firm-level choice (Settings → Region & Currency) drives both the currency
+// prefix and a handful of jurisdiction-specific labels ("Tender" vs "RFP", "Empanelment" vs
+// "Approved Panel"). Deliberately scoped to English-speaking common-law markets, where the
+// underlying concepts (bidding on institutional work, ongoing panel eligibility) are the same and
+// only the *word* for them differs — this is not a translation layer, and doesn't claim to be one.
+// Kenya is the default since that's where this firm and this app started.
+const COUNTRY_CONFIGS = {
+  KE: { name: "Kenya", currency: "KES", examplePhone: "+254 7XX XXX XXX", exampleContact: "Jane Wanjiru", exampleInstitution: "Nairobi City County", exampleTenderTitle: "Nairobi City County — legal services panel", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  NG: { name: "Nigeria", currency: "NGN", examplePhone: "+234 XXX XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  UG: { name: "Uganda", currency: "UGX", examplePhone: "+256 7XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  TZ: { name: "Tanzania", currency: "TZS", examplePhone: "+255 7XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  ZA: { name: "South Africa", currency: "ZAR", examplePhone: "+27 XX XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  IN: { name: "India", currency: "INR", examplePhone: "+91 XXXXX XXXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  GB: { name: "United Kingdom", currency: "GBP", examplePhone: "+44 7XXX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Contracting authority" } },
+  US: { name: "United States", currency: "USD", examplePhone: "+1 (XXX) XXX-XXXX", terms: { tender: "RFP", tenders: "RFPs", empanelment: "Approved panel", procuringEntity: "Issuing agency" } },
+  CA: { name: "Canada", currency: "CAD", examplePhone: "+1 (XXX) XXX-XXXX", terms: { tender: "RFP", tenders: "RFPs", empanelment: "Approved panel", procuringEntity: "Issuing agency" } },
+  AU: { name: "Australia", currency: "AUD", examplePhone: "+61 4XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  GH: { name: "Ghana", currency: "GHS", examplePhone: "+233 XX XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  ZM: { name: "Zambia", currency: "ZMW", examplePhone: "+260 XX XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  ZW: { name: "Zimbabwe", currency: "ZWL", examplePhone: "+263 7X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  MW: { name: "Malawi", currency: "MWK", examplePhone: "+265 X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  RW: { name: "Rwanda", currency: "RWF", examplePhone: "+250 7XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  BW: { name: "Botswana", currency: "BWP", examplePhone: "+267 7X XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  NA: { name: "Namibia", currency: "NAD", examplePhone: "+264 8X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  SL: { name: "Sierra Leone", currency: "SLE", examplePhone: "+232 XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  LR: { name: "Liberia", currency: "LRD", examplePhone: "+231 XX XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  GM: { name: "Gambia", currency: "GMD", examplePhone: "+220 XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  MU: { name: "Mauritius", currency: "MUR", examplePhone: "+230 XXXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  PK: { name: "Pakistan", currency: "PKR", examplePhone: "+92 3XX XXXXXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  BD: { name: "Bangladesh", currency: "BDT", examplePhone: "+880 1XXX XXXXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  LK: { name: "Sri Lanka", currency: "LKR", examplePhone: "+94 7X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Empanelment", procuringEntity: "Procuring entity" } },
+  IE: { name: "Ireland", currency: "EUR", examplePhone: "+353 8X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Contracting authority" } },
+  NZ: { name: "New Zealand", currency: "NZD", examplePhone: "+64 2X XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  SG: { name: "Singapore", currency: "SGD", examplePhone: "+65 XXXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  HK: { name: "Hong Kong", currency: "HKD", examplePhone: "+852 XXXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  MT: { name: "Malta", currency: "EUR", examplePhone: "+356 XXXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Contracting authority" } },
+  CY: { name: "Cyprus", currency: "EUR", examplePhone: "+357 XX XXX XXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Contracting authority" } },
+  FJ: { name: "Fiji", currency: "FJD", examplePhone: "+679 XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  PG: { name: "Papua New Guinea", currency: "PGK", examplePhone: "+675 XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  PH: { name: "Philippines", currency: "PHP", examplePhone: "+63 9XX XXX XXXX", terms: { tender: "RFP", tenders: "RFPs", empanelment: "Approved panel", procuringEntity: "Issuing agency" } },
+  JM: { name: "Jamaica", currency: "JMD", examplePhone: "+1 (876) XXX-XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  TT: { name: "Trinidad and Tobago", currency: "TTD", examplePhone: "+1 (868) XXX-XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  BB: { name: "Barbados", currency: "BBD", examplePhone: "+1 (246) XXX-XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  BS: { name: "Bahamas", currency: "BSD", examplePhone: "+1 (242) XXX-XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  GY: { name: "Guyana", currency: "GYD", examplePhone: "+592 XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+  BZ: { name: "Belize", currency: "BZD", examplePhone: "+501 XXX XXXX", terms: { tender: "Tender", tenders: "Tenders", empanelment: "Panel appointment", procuringEntity: "Procuring entity" } },
+};
+const DEFAULT_COUNTRY = "KE";
+// A plain module-level variable, not React state — fmtKES/term() are ordinary functions called
+// from dozens of places that aren't components and can't use hooks. App() keeps this in sync with
+// the real, persisted store.firmCountry via a useEffect; this is just what those plain functions
+// read at call time. Every existing fmtKES(...) call site anywhere in the file automatically
+// becomes region-aware with this change — none of them needed to be touched individually.
+let ACTIVE_REGION = COUNTRY_CONFIGS[DEFAULT_COUNTRY];
+function setActiveRegion(countryCode) {
+  ACTIVE_REGION = COUNTRY_CONFIGS[countryCode] || COUNTRY_CONFIGS[DEFAULT_COUNTRY];
+}
+function term(key) {
+  return ACTIVE_REGION.terms[key] || COUNTRY_CONFIGS[DEFAULT_COUNTRY].terms[key] || key;
+}
+// For sentence-style copy ("New tender", "which tender?") — lowercases ordinary words but leaves
+// an all-caps acronym term (like "RFP") alone, since "new rfp" reads as a typo, not a sentence.
+function termLower(key) {
+  const t = term(key);
+  return t === t.toUpperCase() ? t : t.toLowerCase();
+}
+// Only Kenya has hand-set, real example text (a real city/county, a plausible local name) — for
+// every other market, rather than guess at a specific city or naming convention I can't verify,
+// this falls back to something deliberately generic. Accurate over locally flavored but wrong.
+const DEFAULT_EXAMPLES = {
+  exampleContact: "Alex Morgan",
+  exampleInstitution: "the relevant government agency",
+  exampleTenderTitle: "Government legal services panel",
+};
+function regionExample(key) {
+  return ACTIVE_REGION[key] || DEFAULT_EXAMPLES[key];
+}
+const fmtKES = (n) => (n ? `${ACTIVE_REGION.currency} ${Number(n).toLocaleString()}` : "—");
 // Same formatting as fmtKES, but for figures where zero is a genuine, meaningful answer (nothing
 // collected yet, nothing outstanding) rather than an empty/unset field — those should read as
-// "KES 0", not fmtKES's "—", which would wrongly look like missing data instead of a real zero.
-const fmtKESExact = (n) => `KES ${Number(n || 0).toLocaleString()}`;
+// "<currency> 0", not fmtKES's "—", which would wrongly look like missing data instead of a real zero.
+const fmtKESExact = (n) => `${ACTIVE_REGION.currency} ${Number(n || 0).toLocaleString()}`;
 // A small "vs last month" indicator for Scorecard's monthly-flow numbers (Won, qualified
 // opportunities, proposals sent, spend) — deliberately not applied to Live pipeline value, since
 // that's a right-now snapshot rather than a monthly flow, and there's no historical snapshot to
@@ -1059,6 +1142,18 @@ function useStorage(activeFirmId) {
   const [referralTypes, setReferralTypes] = useState(DEFAULT_REFERRAL_TYPES);
   const [nextActionTemplates, setNextActionTemplates] = useState(DEFAULT_NEXT_ACTION_TEMPLATES);
   const [resourcePeople, setResourcePeople] = useState([]);
+  // Firm-wide region choice — drives currency and a handful of jurisdiction-specific labels via
+  // ACTIVE_REGION/term(), synced in App() whenever this changes. Defaults to Kenya.
+  const [firmCountry, setFirmCountry] = useState(DEFAULT_COUNTRY);
+  // The checklist itself is now firm-editable (Settings → Document Checklist) — VAULT_ITEMS below
+  // is only the starting seed for a firm that's never customized it. Each item keeps a stable key
+  // separate from its editable label, so renaming an item never loses checked-off progress.
+  const [vaultChecklist, setVaultChecklist] = useState(VAULT_ITEMS);
+  // A Sales Rep's own targets — separate from the firm-wide activityTargets, which stays a
+  // partner-set number applied uniformly. Deliberately self-set per person: { [repId]:
+  // { [activityTypeKey]: targetNumber } }, so a rep sets their own number rather than a partner
+  // imposing one, matching the consultative approach this was built around.
+  const [repTargets, setRepTargets] = useState({});
   const [sharedDemoHelperState, setSharedDemoHelperState] = useState({});
 
   useEffect(() => {
@@ -1075,7 +1170,7 @@ function useStorage(activeFirmId) {
         const defaultCosts = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.defaultCost]));
         const defaultTargets = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, t.target]));
         const defaultPartners = activeFirmId === "demo" ? DEMO_PARTNERS : activeFirmId === DEFAULT_FIRM_ID ? DEFAULT_PARTNERS : [];
-        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp, dh] = await Promise.all([
+        const [pt, pr, rf, ac, td, vl, cl, sp, sc, sr, st, sat, wl, ct, pc, sx, rt, at, nat, rp, dh, fc, vc, rtg] = await Promise.all([
           safe("kkn-partners", defaultPartners),
           safe("kkn-prospects", []),
           safe("kkn-referrals", []),
@@ -1097,6 +1192,9 @@ function useStorage(activeFirmId) {
           safe("kkn-next-action-templates", DEFAULT_NEXT_ACTION_TEMPLATES),
           safe("kkn-resource-people", []),
           safe("kkn-demo-helper-state", {}),
+          safe("kkn-firm-country", DEFAULT_COUNTRY),
+          safe("kkn-vault-checklist", VAULT_ITEMS),
+          safe("kkn-rep-targets", {}),
         ]);
         setPartners(pt);
         setProspects(pr);
@@ -1126,6 +1224,9 @@ function useStorage(activeFirmId) {
         setNextActionTemplates({ ...DEFAULT_NEXT_ACTION_TEMPLATES, ...nat });
         setResourcePeople(rp);
         setSharedDemoHelperState(dh || {});
+        setFirmCountry(fc && COUNTRY_CONFIGS[fc] ? fc : DEFAULT_COUNTRY);
+        setVaultChecklist(vc && vc.length > 0 ? vc : VAULT_ITEMS);
+        setRepTargets(rtg || {});
       } catch (e) {
         setError("Could not load shared data. You can keep working; changes may not save.");
       } finally {
@@ -1316,6 +1417,22 @@ function useStorage(activeFirmId) {
       saveActivityCosts: (next) => {
         setActivityCosts(next);
         persist("kkn-activity-costs", next);
+      },
+      firmCountry,
+      saveFirmCountry: (countryCode) => {
+        setFirmCountry(countryCode);
+        persist("kkn-firm-country", countryCode);
+      },
+      vaultChecklist,
+      saveVaultChecklist: (next) => {
+        setVaultChecklist(next);
+        persist("kkn-vault-checklist", next);
+      },
+      repTargets,
+      saveRepTargets: (repId, targetsForRep) => {
+        const next = { ...repTargets, [repId]: targetsForRep };
+        setRepTargets(next);
+        persist("kkn-rep-targets", next);
       },
       activityTargets,
       saveActivityTargets: (next) => {
@@ -1526,7 +1643,7 @@ function useStorage(activeFirmId) {
         ]);
       },
     }),
-    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, sharedDemoHelperState, activeFirmId, persist]
+    [partners, prospects, referrals, activity, tenders, vault, clients, seenProspects, seenClients, seenReferrals, seenTenders, seenActivityTypes, watchlist, activityCosts, activityTargets, practices, sectors, referralTypes, nextActionTemplates, resourcePeople, sharedDemoHelperState, activeFirmId, firmCountry, vaultChecklist, repTargets, persist]
   );
 
   return { ready, error, ...api };
@@ -1654,6 +1771,60 @@ function clientValue(clientName, prospects) {
     .filter((p) => !["won", "lost"].includes(p.status))
     .reduce((a, p) => a + (Number(p.estimatedFee) || 0), 0);
   return { matters, matterCount: matters.length, wonCount: won.length, wonValue, pipelineValue };
+}
+
+// A client or referral partner's "introducedByType"/"introducedById" is the one piece of data this
+// whole feature rests on — everything else is just a walk over that single link, in one direction
+// or the other. No separate "tree" data structure exists; the shape only ever emerges from asking
+// the question, the same way a family tree is really just everyone knowing their own parent.
+function findIntroductionNode(type, id, clients, referrals) {
+  if (type === "client") return clients.find((c) => c.id === id);
+  if (type === "referral") return referrals.find((r) => r.id === id);
+  return null;
+}
+// Backward: always a straight line, since a record has exactly one introducer. Returns an array
+// from the root (earliest, no introducer) down to the record itself. Cycle-guarded — a bad manual
+// edit (A introduced by B, B introduced by A) should stop the walk, not loop forever.
+function getIntroductionChain(type, id, clients, referrals) {
+  const chain = [];
+  const seen = new Set();
+  let currentType = type;
+  let currentId = id;
+  while (currentType && currentId && !seen.has(`${currentType}:${currentId}`)) {
+    const node = findIntroductionNode(currentType, currentId, clients, referrals);
+    if (!node) break;
+    seen.add(`${currentType}:${currentId}`);
+    chain.unshift({ type: currentType, id: currentId, name: node.name || referralDisplayName(node) });
+    currentType = node.introducedByType;
+    currentId = node.introducedById;
+  }
+  return chain;
+}
+// Forward: genuinely branches — one introduction can lead to several, each of which can lead to
+// several more. Returns a nested tree, each node carrying its own Client Value (0 for a referral
+// partner node, which doesn't have one) so the aggregate below can sum the whole subtree at once.
+function getIntroducedNetwork(type, id, clients, referrals, prospects, seen = new Set()) {
+  const key = `${type}:${id}`;
+  if (seen.has(key)) return [];
+  const nextSeen = new Set(seen);
+  nextSeen.add(key);
+  const childClients = clients.filter((c) => c.introducedByType === type && c.introducedById === id);
+  const childReferrals = referrals.filter((r) => r.introducedByType === type && r.introducedById === id);
+  const children = [
+    ...childClients.map((c) => ({ type: "client", id: c.id, name: c.name, node: c })),
+    ...childReferrals.map((r) => ({ type: "referral", id: r.id, name: referralDisplayName(r), node: r })),
+  ];
+  return children.map((child) => ({
+    ...child,
+    value: child.type === "client" ? clientValue(child.node.name, prospects).wonValue : 0,
+    children: getIntroducedNetwork(child.type, child.id, clients, referrals, prospects, nextSeen),
+  }));
+}
+function sumNetworkValue(nodes) {
+  return nodes.reduce((sum, n) => sum + n.value + sumNetworkValue(n.children), 0);
+}
+function countNetwork(nodes) {
+  return nodes.reduce((sum, n) => sum + 1 + countNetwork(n.children), 0);
 }
 
 // Pulls together every record with unseen activity, across all four record types plus the
@@ -1898,7 +2069,7 @@ function TenderCard({ t, partners, seenMap, onOpen, permissions = ROLE_PERMISSIO
       </div>
       <TenderStageRail stage={t.stage} />
       <div className="card-meta">
-        {t.kind === "empanelment" && <Pill tone="score">Empanelment</Pill>}
+        {t.kind === "empanelment" && <Pill tone="score">{term("empanelment")}</Pill>}
         {t.outcome && <Pill tone={t.outcome === "Won" ? "score" : t.outcome === "Lost" ? "score-low" : "owner"}>{t.outcome}</Pill>}
         {t.procuringEntity && <Pill>{t.procuringEntity}</Pill>}
         {owner && <Pill tone="owner">{owner.name}</Pill>}
@@ -1924,19 +2095,19 @@ function TenderCard({ t, partners, seenMap, onOpen, permissions = ROLE_PERMISSIO
   );
 }
 
-function VaultChecklist({ vault, onToggle, permissions = ROLE_PERMISSIONS.partner }) {
-  const have = VAULT_ITEMS.filter((i) => vault[i.key]).length;
+function VaultChecklist({ vault, items, onToggle, permissions = ROLE_PERMISSIONS.partner }) {
+  const have = items.filter((i) => vault[i.key]).length;
   return (
     <section className="vault">
       <div className="vault-head">
-        <span>Tender Vault</span>
-        {permissions.seeMetrics && <span className="stat-label">{have}/{VAULT_ITEMS.length} ready</span>}
+        <span>{term("tender")} Vault</span>
+        {permissions.seeMetrics && <span className="stat-label">{have}/{items.length} ready</span>}
       </div>
       <p className="section-intro" style={{ margin: "8px 0 10px" }}>
         Keep this current so no application is ever rebuilt from scratch.
       </p>
       <div className="vault-grid">
-        {VAULT_ITEMS.map((i) => (
+        {items.map((i) => (
           <label key={i.key} className={`vault-item ${vault[i.key] ? "vault-item-on" : ""}`}>
             <input type="checkbox" checked={!!vault[i.key]} onChange={() => onToggle(i.key)} />
             <span>{i.label}</span>
@@ -2150,6 +2321,173 @@ function SuggestInput({ value, onChange, suggestions, placeholder, autoFocus }) 
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// A native <select> is fine for a handful of options — Kenya's counties, a fixed status list — but
+// breaks down the moment a list can genuinely grow large (clients, referral partners): scrolling a
+// plain OS picker through hundreds of entries to find one name is a bad experience. This is the
+// same search-as-you-type dropdown as SuggestInput, but the options are {id, label} records and a
+// selection stores the id, not free text.
+function SearchSelect({ value, options, onSelect, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.id === value);
+  const currentLabel = current ? current.label : "";
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? options.filter((o) => o.label.toLowerCase().includes(q)).slice(0, 8)
+    : options.slice(0, 8);
+  return (
+    <div className="suggest-input-wrap">
+      <input
+        value={open ? query : currentLabel}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => { setQuery(""); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Search…"}
+        autoComplete="off"
+      />
+      {value && !open && (
+        <button type="button" className="mini-btn" style={{ marginTop: 6 }} onClick={() => onSelect("")}>
+          ✕ Clear
+        </button>
+      )}
+      {open && filtered.length > 0 && (
+        <div className="suggest-dropdown">
+          {filtered.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              className="suggest-dropdown-row"
+              onClick={() => { onSelect(o.id); setQuery(""); setOpen(false); }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {open && q && filtered.length === 0 && (
+        <div className="suggest-dropdown">
+          <div className="suggest-dropdown-row" style={{ color: "var(--slate)", cursor: "default" }}>No matches</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Same dropdown UX as SuggestInput, but a selection is a real record (a client or a referral
+// partner), not free text — so onSelect gets {type, id, label} rather than a string. Excludes the
+// record's own type+id from the options, so nothing can be set as its own introducer.
+function IntroducedByPicker({ introducedByType, introducedById, clients, referrals, excludeType, excludeId, onSelect }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const current = introducedById ? findIntroductionNode(introducedByType, introducedById, clients, referrals) : null;
+  const currentLabel = current ? (introducedByType === "client" ? current.name : referralDisplayName(current)) : "";
+  const options = [
+    ...clients.map((c) => ({ type: "client", id: c.id, label: c.name })),
+    ...referrals.map((r) => ({ type: "referral", id: r.id, label: referralDisplayName(r) })),
+  ]
+    .filter((o) => !(o.type === excludeType && o.id === excludeId))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  const q = query.trim().toLowerCase();
+  const filtered = q ? options.filter((o) => o.label.toLowerCase().includes(q)).slice(0, 8) : options.slice(0, 8);
+  return (
+    <div className="suggest-input-wrap">
+      <input
+        value={open ? query : currentLabel}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => { setQuery(""); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Search a client or referral partner…"
+        autoComplete="off"
+      />
+      {introducedById && !open && (
+        <button type="button" className="mini-btn" style={{ marginTop: 6 }} onClick={() => onSelect("", "")}>
+          ✕ Clear — mark as cold / direct
+        </button>
+      )}
+      {open && filtered.length > 0 && (
+        <div className="suggest-dropdown">
+          {filtered.map((o) => (
+            <button
+              key={`${o.type}-${o.id}`}
+              type="button"
+              className="suggest-dropdown-row"
+              onClick={() => { onSelect(o.type, o.id); setQuery(""); setOpen(false); }}
+            >
+              {o.label} <span className="stat-label">· {o.type === "client" ? "Client" : "Referral"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+function IntroductionChain({ type, id, clients, referrals }) {
+  const chain = getIntroductionChain(type, id, clients, referrals);
+  if (chain.length <= 1) return null;
+  return (
+    <div className="record-summary" style={{ marginTop: 8 }}>
+      <div className="stat-label" style={{ marginBottom: 6 }}>How this relationship came about</div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 13 }}>
+        {chain.map((node, i) => (
+          <React.Fragment key={`${node.type}-${node.id}`}>
+            {i > 0 && <span className="stat-label">→</span>}
+            <span style={{ fontWeight: i === chain.length - 1 ? 700 : 500 }}>{node.name}</span>
+          </React.Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+function IntroductionTreeNode({ node, depth }) {
+  const [open, setOpen] = useState(false);
+  const hasChildren = node.children.length > 0;
+  return (
+    <div style={{ marginLeft: depth * 16 }}>
+      <button
+        type="button"
+        className="voice-fill-trigger"
+        style={{ textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}
+        onClick={() => hasChildren && setOpen((v) => !v)}
+      >
+        <span>
+          {hasChildren ? (open ? "▾ " : "▸ ") : "· "}
+          {node.name}
+          {node.type === "referral" && <span className="stat-label"> · Referral</span>}
+        </span>
+        {node.value > 0 && <span className="mono">{fmtKES(node.value)}</span>}
+      </button>
+      {open && node.children.map((child) => (
+        <IntroductionTreeNode key={`${child.type}-${child.id}`} node={child} depth={depth + 1} />
+      ))}
+    </div>
+  );
+}
+function IntroductionTree({ type, id, clients, referrals, prospects }) {
+  const [expanded, setExpanded] = useState(false);
+  const network = getIntroducedNetwork(type, id, clients, referrals, prospects);
+  if (network.length === 0) return null;
+  const totalValue = sumNetworkValue(network);
+  const totalCount = countNetwork(network);
+  return (
+    <div className="record-summary" style={{ marginTop: 8 }}>
+      <button
+        type="button"
+        className="vault-head"
+        style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: 0, marginBottom: expanded ? 8 : 0 }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span>{expanded ? "▾ " : "▸ "}Who this has brought in</span>
+        <span className="stat-label">
+          {totalCount} relationship{totalCount === 1 ? "" : "s"}{totalValue > 0 ? ` · ${fmtKES(totalValue)} won` : ""}
+        </span>
+      </button>
+      {expanded && network.map((child) => (
+        <IntroductionTreeNode key={`${child.type}-${child.id}`} node={child} depth={0} />
+      ))}
     </div>
   );
 }
@@ -2447,7 +2785,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
     Referral: { fieldLabel: "Which referral partner?", list: referrals || [], getLabel: (r) => referralDisplayName(r) },
     "Partner introduction": { fieldLabel: "Which partner?", list: partners || [], getLabel: (p) => p.name },
     "Existing client": { fieldLabel: "Which client?", list: clients || [], getLabel: (c) => c.name },
-    Tender: { fieldLabel: "Which tender?", list: tenders || [], getLabel: (t) => t.title },
+    Tender: { fieldLabel: `Which ${term("tender")}?`, list: tenders || [], getLabel: (t) => t.title },
   };
   const linkedSourceConfig = LINKED_SOURCES[f.source];
   // If the organization typed here matches an existing client (case-insensitive), this is a repeat
@@ -2575,7 +2913,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
               {f.clientType !== "Individual" && (
                 <div className="row2">
                   <Field label="Contact">
-                    <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                    <input value={f.contact} onChange={set("contact")} placeholder={regionExample("exampleContact")} />
                   </Field>
                   <Field label="Position">
                     <SuggestInput value={f.position} onChange={set("position")} suggestions={positions} placeholder="CFO" />
@@ -2590,7 +2928,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
               {showContact && (
                 <div className="row2">
                   <Field label="Phone">
-                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder={ACTIVE_REGION.examplePhone} />
                   </Field>
                   <Field label="Email">
                     <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
@@ -2628,7 +2966,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
               {permissions.seeAmounts ? (
                 <>
                   <div className="row2">
-                    <Field label={f.status === "won" ? "Original estimate (KES)" : "Estimated fee (KES)"}>
+                    <Field label={f.status === "won" ? `Original estimate (${ACTIVE_REGION.currency})` : `Estimated fee (${ACTIVE_REGION.currency})`}>
                       <input type="number" value={f.estimatedFee} onChange={set("estimatedFee")} placeholder="600000" />
                     </Field>
                     <Field label="Source">
@@ -2680,12 +3018,12 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
               )}
               {linkedSourceConfig && (
                 <Field label={linkedSourceConfig.fieldLabel}>
-                  <select value={f.sourceDetailId} onChange={set("sourceDetailId")}>
-                    <option value="">Select…</option>
-                    {linkedSourceConfig.list.map((item) => (
-                      <option key={item.id} value={item.id}>{linkedSourceConfig.getLabel(item)}</option>
-                    ))}
-                  </select>
+                  <SearchSelect
+                    value={f.sourceDetailId}
+                    options={linkedSourceConfig.list.map((item) => ({ id: item.id, label: linkedSourceConfig.getLabel(item) }))}
+                    onSelect={(id) => setF({ ...f, sourceDetailId: id })}
+                    placeholder={`Search — ${linkedSourceConfig.list.length} to choose from…`}
+                  />
                 </Field>
               )}
             </>
@@ -2772,7 +3110,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
                 </div>
               )
             ) : (
-              <Field label="Agreed value (KES)">
+              <Field label={`Agreed value (${ACTIVE_REGION.currency})`}>
                 <input type="number" value={f.agreedValue} onChange={set("agreedValue")} placeholder="600000" autoFocus={focusAgreedInput} />
               </Field>
             )
@@ -2790,7 +3128,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
             <>
               <PaymentLog payments={f.payments} dealValue={effectiveDealValue(f)} partners={partners} />
               <div className="row2">
-                <Field label="Log a payment (KES)">
+                <Field label={`Log a payment (${ACTIVE_REGION.currency})`}>
                   <input
                     type="number"
                     value={paymentAmount}
@@ -2876,7 +3214,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
   );
 }
 
-function ReferralModal({ item, prefillName, partners, practices, referralTypes, nextActionSuggestions, me, onSave, onDelete, onClose, markSeen, getDayLoad }) {
+function ReferralModal({ item, prefillName, partners, clients, referrals, prospects, practices, referralTypes, nextActionSuggestions, me, onSave, onDelete, onClose, markSeen, getDayLoad }) {
   // practiceFed used to be a single free-text string ("Tax / Corporate") — treat that as a legacy
   // value and split it into tags on open, rather than losing it or forcing a re-entry.
   const normalizePracticeFed = (val) => {
@@ -2891,6 +3229,8 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
           institution: item.institution || "",
           responsiblePartner: item.responsiblePartner || partners[0]?.id || "",
           practiceFed: normalizePracticeFed(item.practiceFed),
+          introducedByType: item.introducedByType || "",
+          introducedById: item.introducedById || "",
           notes: "",
           notesHistory:
             item.notesHistory ||
@@ -2905,6 +3245,8 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
           responsiblePartner: partners[0]?.id || "",
           phone: "",
           email: "",
+          introducedByType: "",
+          introducedById: "",
           lastContact: todayISO(),
           nextAction: "",
           nextActionDate: "",
@@ -3001,6 +3343,17 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
                   })}
                 </div>
               </Field>
+              <Field label="Introduced by (optional)">
+                <IntroducedByPicker
+                  introducedByType={f.introducedByType}
+                  introducedById={f.introducedById}
+                  clients={clients || []}
+                  referrals={referrals || []}
+                  excludeType="referral"
+                  excludeId={f.id}
+                  onSelect={(type, id) => setF({ ...f, introducedByType: type, introducedById: id })}
+                />
+              </Field>
               <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
                 {showContact
                   ? "− Hide contact details"
@@ -3009,7 +3362,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
               {showContact && (
                 <div className="row2">
                   <Field label="Phone">
-                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254 7XX XXX XXX" />
+                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder={ACTIVE_REGION.examplePhone} />
                   </Field>
                   <Field label="Email">
                     <input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" />
@@ -3018,6 +3371,12 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
               )}
               {showContact && <ContactLinkRow phone={f.phone} email={f.email} />}
             </>
+          )}
+          {item && (
+            <IntroductionChain type="referral" id={f.id} clients={clients || []} referrals={referrals || []} />
+          )}
+          {item && (
+            <IntroductionTree type="referral" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
           )}
           <div className="row2">
             <Field label="Last contact">
@@ -3082,7 +3441,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
   );
 }
 
-function ClientModal({ item, partners, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onLogNewWork, onClose, markSeen, getDayLoad }) {
+function ClientModal({ item, partners, clients, referrals, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onLogNewWork, onClose, markSeen, getDayLoad }) {
   const [f, setF] = useState(
     item
       ? {
@@ -3095,6 +3454,8 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           retainerAmount: item.retainerAmount || "",
           retainerFrequency: item.retainerFrequency || "Monthly",
           retainerRenewalDate: item.retainerRenewalDate || "",
+          introducedByType: item.introducedByType || "",
+          introducedById: item.introducedById || "",
           notes: "",
           notesHistory:
             item.notesHistory ||
@@ -3116,6 +3477,8 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           retainerAmount: "",
           retainerFrequency: "Monthly",
           retainerRenewalDate: "",
+          introducedByType: "",
+          introducedById: "",
           lastContact: todayISO(),
           nextAction: "",
           nextActionDate: "",
@@ -3197,7 +3560,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
               {f.clientType !== "Individual" && (
                 <div className="row2">
                   <Field label="Contact">
-                    <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                    <input value={f.contact} onChange={set("contact")} placeholder={regionExample("exampleContact")} />
                   </Field>
                   <Field label="Position">
                     <SuggestInput value={f.position} onChange={set("position")} suggestions={positions} placeholder="CFO" />
@@ -3234,6 +3597,17 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
               <Field label="What else they probably need">
                 <input value={f.potentialNeeds} onChange={set("potentialNeeds")} placeholder="Succession planning, tax structuring" autoComplete="off" />
               </Field>
+              <Field label="Introduced by (optional)">
+                <IntroducedByPicker
+                  introducedByType={f.introducedByType}
+                  introducedById={f.introducedById}
+                  clients={clients || []}
+                  referrals={referrals || []}
+                  excludeType="client"
+                  excludeId={f.id}
+                  onSelect={(type, id) => setF({ ...f, introducedByType: type, introducedById: id })}
+                />
+              </Field>
               <button type="button" className="voice-fill-trigger" onClick={() => setShowContact((v) => !v)}>
                 {showContact
                   ? "− Hide contact details"
@@ -3242,7 +3616,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
               {showContact && (
                 <div className="row2">
                   <Field label="Phone">
-                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder={ACTIVE_REGION.examplePhone} />
                   </Field>
                   <Field label="Email">
                     <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
@@ -3290,7 +3664,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
               </label>
               {permissions.seeAmounts ? (
                 <div className="row2">
-                  <Field label="Retainer amount (KES)">
+                  <Field label={`Retainer amount (${ACTIVE_REGION.currency})`}>
                     <input type="number" value={f.retainerAmount} onChange={set("retainerAmount")} placeholder="150000" />
                   </Field>
                   <Field label="Frequency">
@@ -3341,6 +3715,12 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
                 )}
               </div>
             </section>
+          )}
+          {item && (
+            <IntroductionChain type="client" id={f.id} clients={clients || []} referrals={referrals || []} />
+          )}
+          {item && permissions.seeAmounts && (
+            <IntroductionTree type="client" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
           )}
           <Field label="Last contact">
             <input type="date" value={f.lastContact} onChange={set("lastContact")} />
@@ -3514,7 +3894,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
     <div className="overlay" onClick={onClose}>
       <div className="sheet" onClick={(e) => e.stopPropagation()}>
         <div className="sheet-head">
-          <h3>{tender ? "Edit tender" : "New tender"}</h3>
+          <h3>{tender ? `Edit ${termLower("tender")}` : `New ${termLower("tender")}`}</h3>
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
@@ -3534,7 +3914,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
                 <button type="button" className="mini-btn" onClick={() => setEditingDetails(true)}>✏️ Edit details</button>
               </div>
               <div className="card-meta">
-                {f.kind === "empanelment" && <Pill tone="score">Empanelment</Pill>}
+                {f.kind === "empanelment" && <Pill tone="score">{term("empanelment")}</Pill>}
                 {f.outcome && <Pill tone={f.outcome === "Won" ? "score" : f.outcome === "Lost" ? "score-low" : "owner"}>{f.outcome}</Pill>}
                 {f.procuringEntity && <Pill>{f.procuringEntity}</Pill>}
                 {owner && <Pill tone="owner">{owner.name}</Pill>}
@@ -3550,16 +3930,16 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
             <>
               <Field label="Type">
                 <select value={f.kind} onChange={set("kind")}>
-                  <option value="tender">Tender</option>
-                  <option value="empanelment">Empanelment</option>
+                  <option value="tender">{term("tender")}</option>
+                  <option value="empanelment">{term("empanelment")}</option>
                 </select>
               </Field>
-              <Field label="Tender title">
-                <input value={f.title} onChange={set("title")} placeholder="Nairobi City County — legal services panel" />
+              <Field label={`${term("tender")} title`}>
+                <input value={f.title} onChange={set("title")} placeholder={regionExample("exampleTenderTitle")} />
               </Field>
               <div className="row2">
-                <Field label={f.kind === "empanelment" ? "Institution" : "Procuring entity"}>
-                  <SuggestInput value={f.procuringEntity} onChange={set("procuringEntity")} suggestions={institutionSuggestions} placeholder="Nairobi City County" />
+                <Field label={f.kind === "empanelment" ? "Institution" : term("procuringEntity")}>
+                  <SuggestInput value={f.procuringEntity} onChange={set("procuringEntity")} suggestions={institutionSuggestions} placeholder={regionExample("exampleInstitution")} />
                 </Field>
                 <Field label={f.kind === "empanelment" ? "Renewal date" : "Submission deadline"}>
                   <input type="date" value={f.deadline} onChange={set("deadline")} />
@@ -3567,7 +3947,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
               </div>
               <div className="row2">
                 <Field label="Contact person">
-                  <input value={f.contact} onChange={set("contact")} placeholder="Jane Wanjiru" />
+                  <input value={f.contact} onChange={set("contact")} placeholder={regionExample("exampleContact")} />
                 </Field>
                 <Field label="Position">
                   <input value={f.position} onChange={set("position")} placeholder="Procurement Officer" />
@@ -3581,7 +3961,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
               {showContact && (
                 <div className="row2">
                   <Field label="Phone">
-                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder="+254 7XX XXX XXX" />
+                    <input type="tel" value={f.contactPhone} onChange={set("contactPhone")} placeholder={ACTIVE_REGION.examplePhone} />
                   </Field>
                   <Field label="Email">
                     <input type="email" value={f.contactEmail} onChange={set("contactEmail")} placeholder="name@company.com" />
@@ -3591,7 +3971,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
               {showContact && <ContactLinkRow phone={f.contactPhone} email={f.contactEmail} />}
               {permissions.seeAmounts ? (
                 <div className="row2">
-                  <Field label={f.kind === "empanelment" ? "Est. annual value (optional)" : "Estimated value (KES)"}>
+                  <Field label={f.kind === "empanelment" ? "Est. annual value (optional)" : `Estimated value (${ACTIVE_REGION.currency})`}>
                     <input type="number" value={f.estimatedValue} onChange={set("estimatedValue")} placeholder="1200000" />
                   </Field>
                   <Field label="Responsible partner">
@@ -3872,7 +4252,7 @@ function CostOfBDPage({ store }) {
           <div key={t.key} className="cost-row">
             <span className="cost-row-label">{t.label}</span>
             <div className="cost-row-input">
-              <span>KES</span>
+              <span>{ACTIVE_REGION.currency}</span>
               <input
                 type="number"
                 min="0"
@@ -3939,6 +4319,53 @@ function BDTargetsPage({ store }) {
         style={{ marginTop: 14 }}
       >
         {justSaved ? "✓ Saved" : "Save monthly targets"}
+      </button>
+    </>
+  );
+}
+
+// A Sales Rep sets their own numbers here — deliberately not something a partner configures for
+// them, matching the consultative approach this was built around. Same shape and UI pattern as
+// BDTargetsPage, just saved against this one rep's own entry in repTargets rather than the shared
+// firm-wide activityTargets.
+function RepTargetsPage({ store, me }) {
+  const existing = store.repTargets[me] || {};
+  const [targets, setTargets] = useState({ ...existing });
+  const [justSaved, setJustSaved] = useState(false);
+  const dirty = ACTIVITY_TYPES.some((t) => Number(targets[t.key] || 0) !== Number(existing[t.key] || 0));
+
+  return (
+    <>
+      <p className="insight-note">
+        Your own monthly targets — not set by a partner, set by you. Partners can see what you've set alongside how you're actually tracking against it, but only you can change it.
+      </p>
+      <div className="cost-table">
+        {ACTIVITY_TYPES.map((t) => (
+          <div key={t.key} className="cost-row">
+            <span className="cost-row-label">{t.label}</span>
+            <div className="cost-row-input">
+              <input
+                type="number"
+                min="0"
+                value={targets[t.key] ?? 0}
+                onChange={(e) => setTargets({ ...targets, [t.key]: e.target.value })}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!dirty}
+        onClick={() => {
+          const cleaned = Object.fromEntries(ACTIVITY_TYPES.map((t) => [t.key, Math.max(0, Number(targets[t.key]) || 0)]));
+          store.saveRepTargets(me, cleaned);
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 2000);
+        }}
+        style={{ marginTop: 14 }}
+      >
+        {justSaved ? "✓ Saved" : "Save my targets"}
       </button>
     </>
   );
@@ -4027,6 +4454,136 @@ function EditableListPage({ initial, note, addPlaceholder, addLabel, saveLabel, 
         style={{ marginTop: 14 }}
       >
         {justSaved ? "✓ Saved" : saveLabel}
+      </button>
+    </>
+  );
+}
+
+// One choice — country — drives currency and a handful of jurisdiction-specific labels together,
+// via ACTIVE_REGION/term(). Kenya is the default since that's where this firm and this app started;
+// a firm operating under a different jurisdiction's terms can switch it here.
+function RegionSettingsPage({ store }) {
+  const [country, setCountry] = useState(store.firmCountry || DEFAULT_COUNTRY);
+  const [justSaved, setJustSaved] = useState(false);
+  const dirty = country !== (store.firmCountry || DEFAULT_COUNTRY);
+  const preview = COUNTRY_CONFIGS[country] || COUNTRY_CONFIGS[DEFAULT_COUNTRY];
+  const savedCountryName = (COUNTRY_CONFIGS[store.firmCountry] || COUNTRY_CONFIGS[DEFAULT_COUNTRY]).name;
+
+  return (
+    <>
+      <p className="insight-note">
+        Sets the firm's currency and a handful of jurisdiction-specific terms — "Tender" vs "RFP," "Empanelment" vs "Approved panel" — throughout the app. This isn't a full translation: it covers the English-language terms that differ between common-law markets, not other languages.
+      </p>
+      <p className="insight-note" style={{ fontWeight: 600, color: "var(--navy)" }}>
+        Currently saved: {savedCountryName}
+      </p>
+      <Field label="Country">
+        <select value={country} onChange={(e) => { setCountry(e.target.value); setJustSaved(false); }}>
+          {Object.entries(COUNTRY_CONFIGS).map(([code, cfg]) => (
+            <option key={code} value={code}>{cfg.name}</option>
+          ))}
+        </select>
+      </Field>
+      <div className="record-summary" style={{ marginTop: 4 }}>
+        <div className="stat-label" style={{ marginBottom: 6 }}>With this selection</div>
+        <p className="reminder-action" style={{ margin: "0 0 4px" }}>Currency shown throughout the app: <strong>{preview.currency}</strong></p>
+        <p className="reminder-action muted-line" style={{ margin: 0 }}>
+          "{preview.terms.tender}" instead of "Tender" &nbsp;·&nbsp; "{preview.terms.empanelment}" instead of "Empanelment" &nbsp;·&nbsp; "{preview.terms.procuringEntity}" instead of "Procuring entity"
+        </p>
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!dirty && !justSaved}
+        onClick={() => {
+          store.saveFirmCountry(country);
+          setJustSaved(true);
+        }}
+        style={{ marginTop: 14 }}
+      >
+        {justSaved && !dirty ? "✓ Saved — active now" : "Save region"}
+      </button>
+    </>
+  );
+}
+
+// A dedicated page rather than reusing EditableListPage: that component treats an item's text as
+// its own identity (renaming is really "remove old text, add new text"), which is exactly wrong
+// here — a vault item's checked-off progress is stored against a stable key, and renaming its
+// label must never disturb that. New items get a real uid(), same as every other record type.
+function VaultChecklistSettingsPage({ store }) {
+  const [items, setItems] = useState([...store.vaultChecklist]);
+  const [newItem, setNewItem] = useState("");
+  const [renamingKey, setRenamingKey] = useState(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
+  const dirty = JSON.stringify(items) !== JSON.stringify(store.vaultChecklist);
+
+  const add = () => {
+    const v = newItem.trim();
+    if (!v) return;
+    setItems([...items, { key: uid(), label: v }]);
+    setNewItem("");
+  };
+  const remove = (key) => setItems(items.filter((i) => i.key !== key));
+
+  const startRename = (item) => {
+    setRenamingKey(item.key);
+    setRenameDraft(item.label);
+  };
+  const confirmRename = (key) => {
+    const v = renameDraft.trim();
+    if (!v) return;
+    setItems(items.map((i) => (i.key === key ? { ...i, label: v } : i)));
+    setRenamingKey(null);
+  };
+
+  return (
+    <>
+      <p className="insight-note">
+        What the firm needs on file before any {termLower("tender")} or {termLower("empanelment")} application goes out — practising certificates, firm profile, whatever's actually asked for where you operate. Add what's missing, rename anything that doesn't match how the firm actually talks about it, remove what's never used. Already-checked progress on an item stays with it as long as it isn't removed here.
+      </p>
+      <div className="cost-table">
+        {items.map((item) =>
+          renamingKey === item.key ? (
+            <div key={item.key} className="cost-row cost-row-editing">
+              <input
+                className="rename-input"
+                value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                autoFocus
+              />
+              <div className="rename-actions">
+                <button type="button" className="chip-btn" onClick={() => confirmRename(item.key)}>Save</button>
+                <button type="button" className="chip-btn chip-ghost" onClick={() => setRenamingKey(null)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <div key={item.key} className="cost-row">
+              <span className="cost-row-label">{item.label}</span>
+              <div className="cost-row-actions">
+                <button type="button" className="icon-btn" onClick={() => startRename(item)} aria-label={`Rename ${item.label}`}>✏️</button>
+                <ConfirmButton className="icon-btn" ariaLabel={`Remove ${item.label}`} onConfirm={() => remove(item.key)}>✕</ConfirmButton>
+              </div>
+            </div>
+          )
+        )}
+        {items.length === 0 && <p className="empty">Nothing left — add at least one below.</p>}
+      </div>
+      <div className="watchlist-add" style={{ marginTop: 12 }}>
+        <input value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="e.g. B-BBEE certificate" />
+        <button type="button" className="chip-btn" onClick={add}>+ Add item</button>
+      </div>
+      <button
+        className="btn btn-primary"
+        disabled={!dirty || items.length === 0}
+        onClick={() => {
+          store.saveVaultChecklist(items);
+          setJustSaved(true);
+          setTimeout(() => setJustSaved(false), 2000);
+        }}
+        style={{ marginTop: 14 }}
+      >
+        {justSaved ? "✓ Saved" : "Save checklist"}
       </button>
     </>
   );
@@ -4148,7 +4705,7 @@ function ResourcePersonModal({ item, me, referrals, onSave, onDelete, onAddAsRef
               {showContact && (
                 <div className="row2">
                   <Field label="Phone">
-                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder="+254 7XX XXX XXX" />
+                    <input type="tel" value={f.phone} onChange={set("phone")} placeholder={ACTIVE_REGION.examplePhone} />
                   </Field>
                   <Field label="Email">
                     <input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" />
@@ -4335,10 +4892,10 @@ function NextActionTemplatesPage({ store }) {
       <EditableListPage
         key={type}
         initial={store.nextActionTemplates[type] || []}
-        note={`Shown as suggestions when adding a next action for ${NEXT_ACTION_TYPE_LABELS[type]}.`}
+        note={`Shown as suggestions when adding a next action for ${nextActionTypeLabel(type)}.`}
         addPlaceholder="e.g. Send fee proposal"
         addLabel="+ Add next action"
-        saveLabel={`Save ${NEXT_ACTION_TYPE_LABELS[type]} next actions`}
+        saveLabel={`Save ${nextActionTypeLabel(type)} next actions`}
         onSave={(list) => store.saveNextActionTemplates(type, list)}
       />
     </>
@@ -4423,8 +4980,11 @@ function DemoDataSettingsPage({ demoActive, onLoadDemoData, onClearDemoData, onC
 const SETTINGS_PAGES = [
   { key: "demoData", label: "Demo Data", desc: "Load or clear sample data for this workspace", Component: DemoDataSettingsPage, ownerOnly: true },
   { key: "access", label: "Invite your people", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
+  { key: "region", label: "Region & Currency", desc: "Country, currency, and jurisdiction-specific terms used throughout the app", Component: RegionSettingsPage, ownerOnly: true },
+  { key: "vaultChecklist", label: "Document Checklist", desc: "What the firm needs on file before a tender or empanelment application goes out", Component: VaultChecklistSettingsPage },
   { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs Office Admin access", Component: TeamRolesPage, partnerOnly: true },
-  { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true },
+  { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true, hideFromScopedSelf: true },
+  { key: "myTargets", label: "My Targets", desc: "Set your own monthly targets — visible to partners, editable only by you", Component: RepTargetsPage, onlyScopedSelf: true },
   { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage, requiresAmounts: true },
   { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage },
   { key: "sectors", label: "Sectors", desc: "The industry list prospects and clients get categorized under", Component: SectorsPage },
@@ -4538,7 +5098,12 @@ function FirmAccessPage({ activeFirm }) {
 function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, activeFirm, canExport = false, isFirmOwner = false, demoActive = false, onLoadDemoData, onClearDemoData, onClearAllData, initialPage = null, onClose }) {
   const [page, setPage] = useState(initialPage); // null = menu, or a SETTINGS_PAGES key
   const visiblePages = SETTINGS_PAGES.filter(
-    (p) => (!p.requiresAmounts || permissions.seeAmounts) && (!p.partnerOnly || permissions.manageRoles) && (!p.ownerOnly || isFirmOwner)
+    (p) =>
+      (!p.requiresAmounts || permissions.seeAmounts) &&
+      (!p.partnerOnly || permissions.manageRoles) &&
+      (!p.ownerOnly || isFirmOwner) &&
+      (!p.hideFromScopedSelf || !permissions.scopedToSelf) &&
+      (!p.onlyScopedSelf || permissions.scopedToSelf)
   );
   const active = visiblePages.find((p) => p.key === page);
 
@@ -4590,7 +5155,7 @@ function NotificationFeed({ feed, onSelectProspect, onSelectClient, onSelectRefe
     { label: "Prospects", items: feed.prospects, getTitle: (r) => r.organization, onSelect: onSelectProspect },
     { label: "Clients", items: feed.clients, getTitle: (r) => r.name, onSelect: onSelectClient },
     { label: "Referral partners", items: feed.referrals, getTitle: (r) => referralDisplayName(r), onSelect: onSelectReferral },
-    { label: "Tenders", items: feed.tenders, getTitle: (r) => r.title, onSelect: onSelectTender },
+    { label: term("tenders"), items: feed.tenders, getTitle: (r) => r.title, onSelect: onSelectTender },
     { label: "Scorecard", items: feed.activityTypes, getTitle: (r) => r.label, onSelect: onSelectActivityType },
   ].filter((g) => g.items.length > 0);
 
@@ -4660,6 +5225,11 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const activeFirmId = activeFirm?.id || DEFAULT_FIRM_ID;
   const store = useStorage(activeFirmId);
   const sharedDemoHelperState = store.demoHelperState;
+  // Keeps the module-level ACTIVE_REGION (read by fmtKES/fmtKESExact/term(), which are plain
+  // functions and can't use hooks themselves) in sync with the real, persisted firmCountry setting.
+  useEffect(() => {
+    setActiveRegion(store.firmCountry || DEFAULT_COUNTRY);
+  }, [store.firmCountry]);
   // iOS shrinks the *visible* area when the keyboard opens but leaves position:fixed elements
   // sized to the full, unchanged layout viewport — that mismatch is what causes a fixed modal to
   // scroll unpredictably and let the page behind it show through. Tracking the real visual
@@ -5011,6 +5581,18 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPartner = store.partners.find((p) => p.id === me);
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
+  // REP DATA SCOPING — the one place in the app where a role restricts which records exist for
+  // someone, not just which features they can use. A Sales Rep never sees another rep's or a
+  // partner's prospects, tenders, or referrals — and a client is visible to them at all only once
+  // they've personally logged a matter against it, scoped to their own contribution, never the
+  // client's full history with the firm. This is a UI-level filter, same as every other role
+  // restriction in this app — a real backend should additionally enforce this with row-level
+  // security keyed to the logged-in user, not rely on the browser alone to withhold data it
+  // technically already has in memory.
+  const repOwnProspects = myPermissions.scopedToSelf ? store.prospects.filter((p) => p.responsiblePartner === me) : store.prospects;
+  const repVisibleClientNames = myPermissions.scopedToSelf
+    ? new Set(repOwnProspects.map((p) => (p.organization || "").trim().toLowerCase()).filter(Boolean))
+    : null; // null means "no restriction" — used only by partners/admins
   const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
   const isFirmOwner = membershipRole === "owner";
   const demoLoadOfferVisits = Number(demoLoadOfferState.visits || 0);
@@ -5032,7 +5614,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     demoClearVisits % DEMO_READY_RELOAD_COUNT === 0 &&
     demoClearPromptState.dismissedAtVisit !== demoClearVisits;
   const shouldShowDemoHelper = shouldShowDemoLoadOffer || shouldShowDemoClearReminder;
-  const visibleProspects = store.prospects
+  const visibleProspects = repOwnProspects
     .filter((p) => filterPartner === "all" || p.responsiblePartner === filterPartner)
     .filter((p) => matchesSearch(searchPipeline, [p.organization, p.contact, p.sector, p.opportunity, p.practiceArea]));
 
@@ -5046,13 +5628,35 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     };
   });
 
-  const overdueCount = collectReminders(store).filter((item) => daysBetween(item.date, todayISO()) > 0).length;
-  const feed = computeUnseenFeed(store);
+  // Same REP DATA SCOPING principle as everywhere else — a rep's reminders are a personal
+  // accountability tool, not a window into the firm's open follow-ups. Deliberately checks
+  // ownerId directly rather than reusing the more permissive derived client-visibility rule, since
+  // a reminder assigned to someone else is the firm's business even for a client the rep has
+  // separately logged work against.
+  const repScopedReminders = (storeArg) => {
+    const items = collectReminders(storeArg);
+    return myPermissions.scopedToSelf ? items.filter((item) => item.ownerId === me) : items;
+  };
+  const overdueCount = repScopedReminders(store).filter((item) => daysBetween(item.date, todayISO()) > 0).length;
+  // Same scoping principle applied to the header notification bell — a rep shouldn't see how much
+  // activity is happening firm-wide any more than they should see the underlying records. Reuses
+  // the same scoping primitives computed above rather than duplicating that logic here.
+  const feedStore = myPermissions.scopedToSelf
+    ? {
+        ...store,
+        prospects: repOwnProspects,
+        clients: store.clients.filter((c) => repVisibleClientNames.has((c.name || "").trim().toLowerCase())),
+        referrals: store.referrals.filter((r) => r.responsiblePartner === me),
+        tenders: store.tenders.filter((t) => t.responsiblePartner === me),
+        activity: [], // firm-wide activity-type tallies aren't any one person's to see
+      }
+    : store;
+  const feed = computeUnseenFeed(feedStore);
   // How many other open next-actions (across every record type) already fall on a given date —
   // shown right where a next-action date gets picked, so a day doesn't quietly stack up unnoticed.
   const getDayLoad = (date, excludeId) => {
     if (!date) return 0;
-    return collectReminders(store).filter((item) => item.date === date && item.id !== excludeId).length;
+    return repScopedReminders(store).filter((item) => item.date === date && item.id !== excludeId).length;
   };
   const openFromFeed = {
     prospect: (p) => { setTab("pipeline"); setOpenProspect(p); setNotifOpen(false); },
@@ -5139,7 +5743,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         {[
           ["reminders", "Reminders", overdueCount],
           ["pipeline", "Pipeline", 0],
-          ["tenders", "Tenders", 0],
+          ["tenders", term("tenders"), 0],
           ["clients", "Clients", 0],
           ["referrals", "Referrals", 0],
           ["scorecard", "Scorecard", 0],
@@ -5261,16 +5865,17 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         const visibleTenderCount = TENDER_STAGES.reduce((a, s) => a + store.tenders
           .filter((t) => t.stage === s.key)
           .filter((t) => matchesSearch(searchTenders, [t.title, t.procuringEntity]))
-          .filter((t) => filterTendersPartner === "all" || t.responsiblePartner === filterTendersPartner).length, 0);
+          .filter((t) => filterTendersPartner === "all" || t.responsiblePartner === filterTendersPartner)
+          .filter((t) => !myPermissions.scopedToSelf || t.responsiblePartner === me).length, 0);
         return (
         <main className="content">
-          <VaultChecklist vault={store.vault} onToggle={store.toggleVaultItem} permissions={myPermissions} />
+          <VaultChecklist vault={store.vault} items={store.vaultChecklist} onToggle={store.toggleVaultItem} permissions={myPermissions} />
 
           <p className="section-intro" style={{ marginTop: 16 }}>
             Score every opportunity before committing resources. A disciplined firm wins partly by knowing which tenders not to pursue.
           </p>
 
-          <SearchBox value={searchTenders} onChange={setSearchTenders} placeholder="Search tender title, procuring entity…" />
+          <SearchBox value={searchTenders} onChange={setSearchTenders} placeholder={`Search ${termLower("tender")} title, ${termLower("procuringEntity")}…`} />
           <div className="filter-row">
             {myPermissions.usePartnerFilters && (
               <select value={filterTendersPartner} onChange={(e) => setFilterTendersPartner(e.target.value)}>
@@ -5289,7 +5894,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             const items = store.tenders
               .filter((t) => t.stage === s.key)
               .filter((t) => matchesSearch(searchTenders, [t.title, t.procuringEntity]))
-              .filter((t) => filterTendersPartner === "all" || t.responsiblePartner === filterTendersPartner);
+              .filter((t) => filterTendersPartner === "all" || t.responsiblePartner === filterTendersPartner)
+              .filter((t) => !myPermissions.scopedToSelf || t.responsiblePartner === me);
             const activeItems = items.filter((t) => !t.archived);
             const archivedItems = items.filter((t) => t.archived);
             return (
@@ -5349,7 +5955,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             );
           })}
 
-          <button className="fab" onClick={() => { setTenderPrefill(""); setOpenTender(null); }}>+ New tender</button>
+          <button className="fab" onClick={() => { setTenderPrefill(""); setOpenTender(null); }}>+ New {termLower("tender")}</button>
         </main>
         );
       })()}
@@ -5358,6 +5964,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         const visibleClients = store.clients
           .filter((c) => matchesSearch(searchClients, [c.name, c.sector, c.instructedOn, c.potentialNeeds, c.origin]))
           .filter((c) => filterClientsPartner === "all" || c.responsiblePartner === filterClientsPartner)
+          .filter((c) => !myPermissions.scopedToSelf || repVisibleClientNames.has((c.name || "").trim().toLowerCase()))
           .slice()
           .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         return (
@@ -5435,6 +6042,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         const visibleReferrals = store.referrals
           .filter((r) => matchesSearch(searchReferrals, [r.name, r.type, ...(Array.isArray(r.practiceFed) ? r.practiceFed : [r.practiceFed])]))
           .filter((r) => filterReferralsPartner === "all" || r.responsiblePartner === filterReferralsPartner)
+          .filter((r) => !myPermissions.scopedToSelf || r.responsiblePartner === me)
           .slice()
           .sort((a, b) => (a.lastContact || "") < (b.lastContact || "") ? -1 : 1);
         return (
@@ -5512,6 +6120,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           me={me}
           myPartner={myPartner}
           canViewByPartner={myPermissions.seeScorecardByPartner}
+          scopedToSelf={myPermissions.scopedToSelf}
           canSeeMetrics={myPermissions.seeMetrics}
           canSeeAmounts={myPermissions.seeAmounts}
           onAddAsProspect={(subject) => {
@@ -5533,7 +6142,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         />
       )}
 
-      {tab === "insights" && myPermissions.seeInsights && <Insights store={store} />}
+      {tab === "insights" && myPermissions.seeInsights && <Insights store={store} me={me} permissions={myPermissions} />}
 
       {openProspect !== undefined && (
         <ProspectModal
@@ -5541,7 +6150,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           partners={store.partners}
           referrals={store.referrals}
           clients={store.clients}
-          prospects={store.prospects}
+          prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           tenders={store.tenders}
           activity={store.activity}
           practices={store.practices}
@@ -5575,9 +6184,11 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         <ClientModal
           item={openClient}
           partners={store.partners}
+          clients={store.clients}
+          referrals={store.referrals}
           sectors={store.sectors}
           occupations={occupationSuggestions}
-          prospects={store.prospects}
+          prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           positions={positionSuggestionsList}
           nextActionSuggestions={clientNextActionSuggestions}
           permissions={myPermissions}
@@ -5612,6 +6223,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           item={openReferral}
           prefillName={referralPrefill}
           partners={store.partners}
+          clients={store.clients}
+          referrals={store.referrals}
+          prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           practices={store.practices}
           referralTypes={store.referralTypes}
           nextActionSuggestions={referralNextActionSuggestions}
@@ -5639,7 +6253,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           tender={openTender}
           partners={store.partners}
           clients={store.clients}
-          prospects={store.prospects}
+          prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           nextActionSuggestions={tenderNextActionSuggestions}
           permissions={myPermissions}
           me={me}
@@ -5657,7 +6271,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
               instructedOn: "",
               potentialNeeds: "",
               responsiblePartner: me,
-              origin: "Empanelment",
+              origin: term("empanelment"),
               contactPhone: "",
               contactEmail: "",
               hasRetainer: false,
@@ -5734,6 +6348,7 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(monthKey());
   const withDiff = collectReminders(store)
+    .filter((item) => !permissions.scopedToSelf || item.ownerId === me)
     .filter((item) => filterPartner === "all" || item.ownerId === filterPartner)
     .map((item) => ({ ...item, diff: daysBetween(item.date, todayISO()) }))
     .sort((a, b) => (a.date < b.date ? -1 : 1));
@@ -6328,9 +6943,9 @@ function LogActivityModal({ activityType, store, me, onClose }) {
 const CHART_GOLD = "#C89B3C";
 const CHART_NAVY = "#0B2A4A";
 
-function Insights({ store }) {
-  const [scope, setScope] = useState("firm"); // "firm" | "partner"
-  const [selectedPartner, setSelectedPartner] = useState("all"); // "all" | partnerId
+function Insights({ store, me, permissions = ROLE_PERMISSIONS.partner }) {
+  const [scope, setScope] = useState(permissions.scopedToSelf ? "partner" : "firm"); // "firm" | "partner"
+  const [selectedPartner, setSelectedPartner] = useState(permissions.scopedToSelf ? me : "all"); // "all" | partnerId
   const isCompareAll = scope === "partner" && selectedPartner === "all";
   const isDrilldown = scope === "partner" && selectedPartner !== "all";
   const drilldownPartner = isDrilldown ? store.partners.find((p) => p.id === selectedPartner) : null;
@@ -6620,19 +7235,23 @@ function Insights({ store }) {
         How the pipeline is actually behaving — where the money's coming from, where it's stuck, and what it's worth.
       </p>
 
-      <div className="filter-row">
-        <div className="seg">
-          <button className={scope === "firm" ? "seg-active" : ""} onClick={() => { setScope("firm"); setSelectedPartner("all"); }}>Firm-wide</button>
-          <button className={scope === "partner" ? "seg-active" : ""} onClick={() => setScope("partner")}>By partner</button>
-        </div>
-      </div>
-      {scope === "partner" && (
-        <div className="filter-row">
-          <select value={selectedPartner} onChange={(e) => setSelectedPartner(e.target.value)}>
-            <option value="all">Compare all partners</option>
-            {store.partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </div>
+      {!permissions.scopedToSelf && (
+        <>
+          <div className="filter-row">
+            <div className="seg">
+              <button className={scope === "firm" ? "seg-active" : ""} onClick={() => { setScope("firm"); setSelectedPartner("all"); }}>Firm-wide</button>
+              <button className={scope === "partner" ? "seg-active" : ""} onClick={() => setScope("partner")}>By partner</button>
+            </div>
+          </div>
+          {scope === "partner" && (
+            <div className="filter-row">
+              <select value={selectedPartner} onChange={(e) => setSelectedPartner(e.target.value)}>
+                <option value="all">Compare all partners</option>
+                {store.partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          )}
+        </>
       )}
 
       {isCompareAll ? (
@@ -6810,9 +7429,9 @@ function Insights({ store }) {
 
           {(retainerClients.length > 0 || activeEmpanelments.length > 0 || empanelmentsInProgress.length > 0) && (
             <section className="insight-card">
-              <h4>Recurring Revenue & Empanelments</h4>
+              <h4>Recurring Revenue &amp; {term("empanelment")}s</h4>
               <p className="insight-note">
-                Retainers and empanelments are ongoing relationships, not one-off deals — no single "won" moment to measure, so these are right-now snapshots rather than scoped to the all-time/by-month toggle above.
+                Retainers and {termLower("empanelment")}s are ongoing relationships, not one-off deals — no single "won" moment to measure, so these are right-now snapshots rather than scoped to the all-time/by-month toggle above.
               </p>
               <section className="stat-grid" style={{ marginBottom: 0 }}>
                 <div className="stat">
@@ -6825,13 +7444,37 @@ function Insights({ store }) {
                 </div>
                 <div className="stat">
                   <span className="stat-value">{activeEmpanelments.length}</span>
-                  <span className="stat-label">Active empanelments</span>
+                  <span className="stat-label">Active {termLower("empanelment")}s</span>
                 </div>
                 <div className="stat">
                   <span className="stat-value">{empanelmentsInProgress.length}</span>
-                  <span className="stat-label">Empanelment applications in progress</span>
+                  <span className="stat-label">{term("empanelment")} applications in progress</span>
                 </div>
               </section>
+            </section>
+          )}
+
+          {!permissions.scopedToSelf && store.partners.some((p) => p.role === "salesrep") && (
+            <section className="insight-card">
+              <h4>Sales Reps — target vs. actual</h4>
+              <p className="insight-note">
+                Each rep sets their own monthly target (Settings → My Targets, on their side) — this is what they set, next to what they've actually logged this month. A documented number to point to for any commission or incentive conversation, not a guess.
+              </p>
+              <div className="cost-table">
+                {store.partners.filter((p) => p.role === "salesrep").map((rep) => {
+                  const repTarget = store.repTargets[rep.id] || {};
+                  const targetTotal = ACTIVITY_TYPES.reduce((a, t) => a + (Number(repTarget[t.key]) || 0), 0);
+                  const actualTotal = store.activity.filter((a) => a.partnerId === rep.id && monthKey(a.date) === monthKey()).length;
+                  return (
+                    <div key={rep.id} className="cost-row">
+                      <span className="cost-row-label">{rep.name}</span>
+                      <span className="mono">
+                        {targetTotal > 0 ? `${actualTotal} / ${targetTotal} this month` : `${actualTotal} logged — no target set yet`}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
           )}
 
@@ -7051,8 +7694,8 @@ function Insights({ store }) {
   );
 }
 
-function Scorecard({ store, me, myPartner, canViewByPartner = true, canSeeMetrics = true, canSeeAmounts = true, onAddAsProspect, onAddAsClient, onAddAsReferral, onAddAsTender }) {
-  const [scope, setScope] = useState("firm"); // firm | partner
+function Scorecard({ store, me, myPartner: _myPartner, canViewByPartner = true, scopedToSelf = false, canSeeMetrics = true, canSeeAmounts = true, onAddAsProspect, onAddAsClient, onAddAsReferral, onAddAsTender }) {
+  const [scope, setScope] = useState(scopedToSelf ? "partner" : "firm"); // firm | partner
   const [selectedPartner, setSelectedPartner] = useState(me);
   const [logOpen, setLogOpen] = useState(null); // activity type object or null
   const [expanded, setExpanded] = useState({});
@@ -7130,22 +7773,26 @@ function Scorecard({ store, me, myPartner, canViewByPartner = true, canSeeMetric
         )}
       </div>
 
-      <div className="filter-row">
-        <div className="seg">
-          <button className={scope === "firm" ? "seg-active" : ""} onClick={() => setScope("firm")}>Firm-wide</button>
-          {canViewByPartner && (
-            <button className={scope === "partner" ? "seg-active" : ""} onClick={() => setScope("partner")}>By partner</button>
+      {!scopedToSelf && (
+        <>
+          <div className="filter-row">
+            <div className="seg">
+              <button className={scope === "firm" ? "seg-active" : ""} onClick={() => setScope("firm")}>Firm-wide</button>
+              {canViewByPartner && (
+                <button className={scope === "partner" ? "seg-active" : ""} onClick={() => setScope("partner")}>By partner</button>
+              )}
+            </div>
+          </div>
+          {canViewByPartner && scope === "partner" && (
+            <div className="filter-row">
+              <select value={selectedPartner} onChange={(e) => setSelectedPartner(e.target.value)}>
+                {store.partners.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
           )}
-        </div>
-      </div>
-      {canViewByPartner && scope === "partner" && (
-        <div className="filter-row">
-          <select value={selectedPartner} onChange={(e) => setSelectedPartner(e.target.value)}>
-            {store.partners.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        </div>
+        </>
       )}
 
       {(canSeeAmounts || canSeeMetrics) && (

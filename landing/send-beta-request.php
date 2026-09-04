@@ -11,7 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 // Keep your Resend API key server-side. On cPanel, either set an environment
 // variable named RESEND_API_KEY or replace the placeholder below after upload.
-$resendApiKey = getenv('RESEND_API_KEY') ?: 're_BcB7NLVj_L21HH2UZwhWgKtyPjcJRk3QB';
+$resendApiKey = getenv('RESEND_API_KEY') ?: 'RESEND_API_KEY';
 $toEmail = ['wiztyping@gmail.com', 'lewazkiti@gmail.com'];
 $fromEmail = 'Bideey <no-reply@bideey.com>';
 
@@ -42,7 +42,7 @@ $challenge = field('challenge');
 $message = field('message');
 $consent = isset($_POST['consent']);
 
-if ($resendApiKey === '' || $resendApiKey === 'PASTE_YOUR_RESEND_API_KEY_HERE') {
+if ($resendApiKey === '' || $resendApiKey === 'RESEND_API_KEY') {
     http_response_code(500);
     echo json_encode(['ok' => false, 'message' => 'Email is not configured yet. Please add the Resend API key on the server.']);
     exit;
