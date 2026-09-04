@@ -5077,7 +5077,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       <header className="topbar">
         <button className="brand" onClick={() => setTab("reminders")} aria-label="Go to home">
           <span className="brand-icon brand-letter" aria-hidden="true">B</span>
-          <span className="brand-mark">Bideey</span>
+          <span className="brand-mark">BIDI</span>
         </button>
         <div className="header-right">
           {feed.total > 0 && (
