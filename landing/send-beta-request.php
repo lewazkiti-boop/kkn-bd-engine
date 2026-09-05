@@ -9,11 +9,46 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-// Keep your Resend API key server-side. On cPanel, either set an environment
-// variable named RESEND_API_KEY or replace the placeholder below after upload.
-$resendApiKey = getenv('RESEND_API_KEY') ?: 'RESEND_API_KEY';
-$toEmail = ['wiztyping@gmail.com', 'lewazkiti@gmail.com'];
-$fromEmail = 'Bideey <no-reply@bideey.com>';
+// Keep secrets server-side. Do not paste the Resend API key into index.html,
+// script.js, or any other browser-served file.
+//
+// Recommended cPanel setup:
+// 1) Create this file OUTSIDE public_html:
+//    /home/YOUR_CPANEL_USERNAME/bideey-resend-config.php
+// 2) Put the real key and mail settings in that private file.
+//
+// This handler also supports cPanel environment variables if your hosting plan
+// lets you set them:
+// RESEND_API_KEY, BIDEEY_MAIL_TO, BIDEEY_MAIL_FROM.
+$privateConfigPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'bideey-resend-config.php';
+$privateConfig = [];
+if (is_readable($privateConfigPath)) {
+    $loadedConfig = require $privateConfigPath;
+    if (is_array($loadedConfig)) {
+        $privateConfig = $loadedConfig;
+    }
+}
+
+function env_or_config(string $envName, array $config, string $configName, string $fallback = ''): string
+{
+    $envValue = getenv($envName);
+    if (is_string($envValue) && trim($envValue) !== '') {
+        return trim($envValue);
+    }
+
+    $configValue = $config[$configName] ?? '';
+    return is_string($configValue) ? trim($configValue) : $fallback;
+}
+
+function email_list_from_setting(string $value): array
+{
+    $emails = array_filter(array_map('trim', explode(',', $value)));
+    return array_values(array_filter($emails, static fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL)));
+}
+
+$resendApiKey = env_or_config('RESEND_API_KEY', $privateConfig, 'resend_api_key');
+$toEmail = email_list_from_setting(env_or_config('BIDEEY_MAIL_TO', $privateConfig, 'to', 'wiztyping@gmail.com,lewazkiti@gmail.com'));
+$fromEmail = env_or_config('BIDEEY_MAIL_FROM', $privateConfig, 'from', 'Bideey <no-reply@bideey.com>');
 
 function field(string $name): string
 {
@@ -42,9 +77,15 @@ $challenge = field('challenge');
 $message = field('message');
 $consent = isset($_POST['consent']);
 
-if ($resendApiKey === '' || $resendApiKey === 'RESEND_API_KEY') {
+if ($resendApiKey === '') {
     http_response_code(500);
     echo json_encode(['ok' => false, 'message' => 'Email is not configured yet. Please add the Resend API key on the server.']);
+    exit;
+}
+
+if (count($toEmail) === 0) {
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'message' => 'Email recipients are not configured yet.']);
     exit;
 }
 
@@ -111,6 +152,7 @@ curl_setopt_array($ch, [
     CURLOPT_HTTPHEADER => [
         'Authorization: Bearer ' . $resendApiKey,
         'Content-Type: application/json',
+        'Idempotency-Key: bideey-walkthrough-' . bin2hex(random_bytes(16)),
     ],
     CURLOPT_POSTFIELDS => json_encode($payload),
     CURLOPT_TIMEOUT => 20,

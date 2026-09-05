@@ -334,6 +334,8 @@ function ensureClientsForWonProspects(prospects, clients, firmId = DEFAULT_FIRM_
         potentialNeeds: "",
         responsiblePartner: p.responsiblePartner || "",
         origin: p.source || "",
+        introducedByType: p.introducedByType || "",
+        introducedById: p.introducedById || "",
         lastContact: todayISO(),
         nextAction: "",
         nextActionDate: "",
@@ -1373,6 +1375,8 @@ function useStorage(activeFirmId) {
                   potentialNeeds: "",
                   responsiblePartner: p.responsiblePartner || "",
                   origin: p.source || "",
+                  introducedByType: p.introducedByType || "",
+                  introducedById: p.introducedById || "",
                   lastContact: todayISO(),
                   nextAction: "",
                   nextActionDate: "",
@@ -1782,28 +1786,40 @@ function clientValue(clientName, prospects) {
   return { matters, matterCount: matters.length, wonCount: won.length, wonValue, pipelineValue };
 }
 
-// A client or referral partner's "introducedByType"/"introducedById" is the one piece of data this
-// whole feature rests on — everything else is just a walk over that single link, in one direction
-// or the other. No separate "tree" data structure exists; the shape only ever emerges from asking
-// the question, the same way a family tree is really just everyone knowing their own parent.
-function findIntroductionNode(type, id, clients, referrals) {
+// A client, referral partner, or prospect's "introducedByType"/"introducedById" is the one piece
+// of data this whole feature rests on — everything else is just a walk over that single link, in
+// one direction or the other. No separate "tree" data structure exists; the shape only ever
+// emerges from asking the question, the same way a family tree is really just everyone knowing
+// their own parent. Prospects are included deliberately — a deal that hasn't closed yet can still
+// have introduced the firm to someone else; the relationship doesn't wait for a matter to be won.
+function findIntroductionNode(type, id, clients, referrals, prospects) {
   if (type === "client") return clients.find((c) => c.id === id);
   if (type === "referral") return referrals.find((r) => r.id === id);
+  if (type === "prospect") return (prospects || []).find((p) => p.id === id);
   return null;
+}
+// One place to turn a node into a display name, since each of the three record types names itself
+// differently (a client's own name field, a referral's name-plus-institution, a prospect's
+// organization) — every chain/tree/picker below calls this instead of guessing per type.
+function introductionNodeLabel(type, node) {
+  if (!node) return "";
+  if (type === "referral") return referralDisplayName(node);
+  if (type === "prospect") return node.organization || "";
+  return node.name || "";
 }
 // Backward: always a straight line, since a record has exactly one introducer. Returns an array
 // from the root (earliest, no introducer) down to the record itself. Cycle-guarded — a bad manual
 // edit (A introduced by B, B introduced by A) should stop the walk, not loop forever.
-function getIntroductionChain(type, id, clients, referrals) {
+function getIntroductionChain(type, id, clients, referrals, prospects) {
   const chain = [];
   const seen = new Set();
   let currentType = type;
   let currentId = id;
   while (currentType && currentId && !seen.has(`${currentType}:${currentId}`)) {
-    const node = findIntroductionNode(currentType, currentId, clients, referrals);
+    const node = findIntroductionNode(currentType, currentId, clients, referrals, prospects);
     if (!node) break;
     seen.add(`${currentType}:${currentId}`);
-    chain.unshift({ type: currentType, id: currentId, name: node.name || referralDisplayName(node) });
+    chain.unshift({ type: currentType, id: currentId, name: introductionNodeLabel(currentType, node) });
     currentType = node.introducedByType;
     currentId = node.introducedById;
   }
@@ -1811,7 +1827,11 @@ function getIntroductionChain(type, id, clients, referrals) {
 }
 // Forward: genuinely branches — one introduction can lead to several, each of which can lead to
 // several more. Returns a nested tree, each node carrying its own Client Value (0 for a referral
-// partner node, which doesn't have one) so the aggregate below can sum the whole subtree at once.
+// partner or a prospect that hasn't won yet — neither has a settled value of its own) so the
+// aggregate below can sum the whole subtree at once. A prospect is included deliberately: a deal
+// that hasn't closed can still have introduced the firm to someone else, and once it does convert,
+// the won client picks up the same introducedByType/Id (see saveProspect), so the chain continues
+// through the client rather than dead-ending at a superseded prospect record.
 function getIntroducedNetwork(type, id, clients, referrals, prospects, seen = new Set()) {
   const key = `${type}:${id}`;
   if (seen.has(key)) return [];
@@ -1819,9 +1839,11 @@ function getIntroducedNetwork(type, id, clients, referrals, prospects, seen = ne
   nextSeen.add(key);
   const childClients = clients.filter((c) => c.introducedByType === type && c.introducedById === id);
   const childReferrals = referrals.filter((r) => r.introducedByType === type && r.introducedById === id);
+  const childProspects = (prospects || []).filter((p) => p.introducedByType === type && p.introducedById === id && p.status !== "won");
   const children = [
     ...childClients.map((c) => ({ type: "client", id: c.id, name: c.name, node: c })),
     ...childReferrals.map((r) => ({ type: "referral", id: r.id, name: referralDisplayName(r), node: r })),
+    ...childProspects.map((p) => ({ type: "prospect", id: p.id, name: p.organization, node: p })),
   ];
   return children.map((child) => ({
     ...child,
@@ -2389,14 +2411,17 @@ function SearchSelect({ value, options, onSelect, placeholder }) {
 // Same dropdown UX as SuggestInput, but a selection is a real record (a client or a referral
 // partner), not free text — so onSelect gets {type, id, label} rather than a string. Excludes the
 // record's own type+id from the options, so nothing can be set as its own introducer.
-function IntroducedByPicker({ introducedByType, introducedById, clients, referrals, excludeType, excludeId, onSelect }) {
+function IntroducedByPicker({ introducedByType, introducedById, clients, referrals, prospects, excludeType, excludeId, onSelect }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-  const current = introducedById ? findIntroductionNode(introducedByType, introducedById, clients, referrals) : null;
-  const currentLabel = current ? (introducedByType === "client" ? current.name : referralDisplayName(current)) : "";
+  const current = introducedById ? findIntroductionNode(introducedByType, introducedById, clients, referrals, prospects) : null;
+  const currentLabel = current ? introductionNodeLabel(introducedByType, current) : "";
   const options = [
     ...clients.map((c) => ({ type: "client", id: c.id, label: c.name })),
     ...referrals.map((r) => ({ type: "referral", id: r.id, label: referralDisplayName(r) })),
+    ...(prospects || [])
+      .filter((p) => p.status !== "won" && p.organization)
+      .map((p) => ({ type: "prospect", id: p.id, label: p.organization })),
   ]
     .filter((o) => !(o.type === excludeType && o.id === excludeId))
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -2409,7 +2434,7 @@ function IntroducedByPicker({ introducedByType, introducedById, clients, referra
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => { setQuery(""); setOpen(true); }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="Search a client or referral partner…"
+        placeholder="Search a client, referral partner, or prospect…"
         autoComplete="off"
       />
       {introducedById && !open && (
@@ -2426,7 +2451,7 @@ function IntroducedByPicker({ introducedByType, introducedById, clients, referra
               className="suggest-dropdown-row"
               onClick={() => { onSelect(o.type, o.id); setQuery(""); setOpen(false); }}
             >
-              {o.label} <span className="stat-label">· {o.type === "client" ? "Client" : "Referral"}</span>
+              {o.label} <span className="stat-label">· {o.type === "client" ? "Client" : o.type === "referral" ? "Referral" : "Prospect"}</span>
             </button>
           ))}
         </div>
@@ -2434,8 +2459,8 @@ function IntroducedByPicker({ introducedByType, introducedById, clients, referra
     </div>
   );
 }
-function IntroductionChain({ type, id, clients, referrals }) {
-  const chain = getIntroductionChain(type, id, clients, referrals);
+function IntroductionChain({ type, id, clients, referrals, prospects }) {
+  const chain = getIntroductionChain(type, id, clients, referrals, prospects);
   if (chain.length <= 1) return null;
   return (
     <div className="record-summary" style={{ marginTop: 8 }}>
@@ -2444,7 +2469,10 @@ function IntroductionChain({ type, id, clients, referrals }) {
         {chain.map((node, i) => (
           <React.Fragment key={`${node.type}-${node.id}`}>
             {i > 0 && <span className="stat-label">→</span>}
-            <span style={{ fontWeight: i === chain.length - 1 ? 700 : 500 }}>{node.name}</span>
+            <span style={{ fontWeight: i === chain.length - 1 ? 700 : 500 }}>
+              {node.name}
+              {node.type === "prospect" && <span className="stat-label"> (prospect)</span>}
+            </span>
           </React.Fragment>
         ))}
       </div>
@@ -2466,6 +2494,7 @@ function IntroductionTreeNode({ node, depth }) {
           {hasChildren ? (open ? "▾ " : "▸ ") : "· "}
           {node.name}
           {node.type === "referral" && <span className="stat-label"> · Referral</span>}
+          {node.type === "prospect" && <span className="stat-label"> · Prospect, not yet won</span>}
         </span>
         {node.value > 0 && <span className="mono">{fmtKES(node.value)}</span>}
       </button>
@@ -2748,6 +2777,8 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           ...prospect,
           clientType: prospect.clientType || CLIENT_TYPES[0],
           agreedValue: prospect.agreedValue ?? "",
+          introducedByType: prospect.introducedByType || "",
+          introducedById: prospect.introducedById || "",
           notes: "",
           notesHistory:
             prospect.notesHistory ||
@@ -2768,6 +2799,8 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           agreedValue: "",
           source: prefillOrg ? "Logged activity" : "",
           sourceDetailId: "",
+          introducedByType: "",
+          introducedById: "",
           relationshipStrength: "Warm",
           lastContact: todayISO(),
           nextAction: "",
@@ -2972,6 +3005,18 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
               <Field label="Opportunity">
                 <input value={f.opportunity} onChange={set("opportunity")} placeholder="Acquisition / development due diligence" />
               </Field>
+              <Field label="Introduced by (optional)">
+                <IntroducedByPicker
+                  introducedByType={f.introducedByType}
+                  introducedById={f.introducedById}
+                  clients={clients || []}
+                  referrals={referrals || []}
+                  prospects={prospects || []}
+                  excludeType="prospect"
+                  excludeId={f.id}
+                  onSelect={(type, id) => setF({ ...f, introducedByType: type, introducedById: id })}
+                />
+              </Field>
               {permissions.seeAmounts ? (
                 <>
                   <div className="row2">
@@ -3056,6 +3101,12 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
                 {STRENGTHS.map((x) => <option key={x}>{x}</option>)}
               </select>
             </Field>
+          )}
+          {prospect && (
+            <IntroductionChain type="prospect" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
+          )}
+          {prospect && permissions.seeAmounts && (
+            <IntroductionTree type="prospect" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
           )}
           <div className="row2">
             <Field label="Last contact">
@@ -3358,6 +3409,7 @@ function ReferralModal({ item, prefillName, partners, clients, referrals, prospe
                   introducedById={f.introducedById}
                   clients={clients || []}
                   referrals={referrals || []}
+                  prospects={prospects || []}
                   excludeType="referral"
                   excludeId={f.id}
                   onSelect={(type, id) => setF({ ...f, introducedByType: type, introducedById: id })}
@@ -3382,7 +3434,7 @@ function ReferralModal({ item, prefillName, partners, clients, referrals, prospe
             </>
           )}
           {item && (
-            <IntroductionChain type="referral" id={f.id} clients={clients || []} referrals={referrals || []} />
+            <IntroductionChain type="referral" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
           )}
           {item && (
             <IntroductionTree type="referral" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
@@ -3612,6 +3664,7 @@ function ClientModal({ item, partners, clients, referrals, sectors, occupations,
                   introducedById={f.introducedById}
                   clients={clients || []}
                   referrals={referrals || []}
+                  prospects={prospects || []}
                   excludeType="client"
                   excludeId={f.id}
                   onSelect={(type, id) => setF({ ...f, introducedByType: type, introducedById: id })}
@@ -3726,7 +3779,7 @@ function ClientModal({ item, partners, clients, referrals, sectors, occupations,
             </section>
           )}
           {item && (
-            <IntroductionChain type="client" id={f.id} clients={clients || []} referrals={referrals || []} />
+            <IntroductionChain type="client" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
           )}
           {item && permissions.seeAmounts && (
             <IntroductionTree type="client" id={f.id} clients={clients || []} referrals={referrals || []} prospects={prospects || []} />
@@ -5030,7 +5083,7 @@ function DemoDataSettingsPage({ demoActive, onLoadDemoData, onClearDemoData, onC
 const SETTINGS_PAGES = [
   { key: "demoData", label: "Demo Data", desc: "Load or clear sample data for this workspace", Component: DemoDataSettingsPage, ownerOnly: true },
   { key: "access", label: "Invite your people", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
-  { key: "region", label: "Region & Currency", desc: "Country, currency, and jurisdiction-specific terms used throughout the app", Component: RegionSettingsPage, partnerOnly: true },
+  { key: "region", label: "Region & Currency", desc: "Country, currency, and jurisdiction-specific terms used throughout the app", Component: RegionSettingsPage, ownerOnly: true },
   { key: "vaultChecklist", label: "Document Checklist", desc: "What the firm needs on file before a tender or empanelment application goes out", Component: VaultChecklistSettingsPage },
   { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs Office Admin access", Component: TeamRolesPage, partnerOnly: true },
   { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true, hideFromScopedSelf: true },
@@ -5731,7 +5784,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       <header className="topbar">
         <button className="brand" onClick={() => setTab("reminders")} aria-label="Go to home">
           <span className="brand-icon brand-letter" aria-hidden="true">B</span>
-          <span className="brand-mark">BIDI</span>
+          <span className="brand-mark">Bideey</span>
         </button>
         <div className="header-right">
           {feed.total > 0 && (
