@@ -17,10 +17,11 @@ create table if not exists firm_members (
   firm_id     text not null references firms(id) on delete cascade,
   user_id     uuid not null references auth.users(id) on delete cascade,
   role        text not null default 'member',
+  active      boolean not null default true,
   created_at  timestamptz not null default now(),
   primary key (firm_id, user_id),
   constraint firm_members_one_firm_per_user unique (user_id),
-  constraint firm_members_role_check check (role in ('owner', 'admin', 'member'))
+  constraint firm_members_role_check check (role in ('owner', 'admin', 'member', 'salesrep'))
 );
 
 do $$
@@ -35,6 +36,15 @@ begin
   end if;
 end $$;
 
+alter table firm_members
+  add column if not exists active boolean not null default true;
+
+alter table firm_members
+  drop constraint if exists firm_members_role_check;
+
+alter table firm_members
+  add constraint firm_members_role_check check (role in ('owner', 'admin', 'member', 'salesrep'));
+
 create table if not exists firm_invites (
   id           uuid primary key default gen_random_uuid(),
   firm_id      text not null references firms(id) on delete cascade,
@@ -46,9 +56,15 @@ create table if not exists firm_invites (
   accepted_at  timestamptz,
   accepted_by  uuid references auth.users(id) on delete set null,
   created_at   timestamptz not null default now(),
-  constraint firm_invites_role_check check (role in ('admin', 'member')),
+  constraint firm_invites_role_check check (role in ('admin', 'member', 'salesrep')),
   constraint firm_invites_email_lowercase check (email is null or email = lower(email))
 );
+
+alter table firm_invites
+  drop constraint if exists firm_invites_role_check;
+
+alter table firm_invites
+  add constraint firm_invites_role_check check (role in ('admin', 'member', 'salesrep'));
 
 create table if not exists firm_kv (
   firm_id     text not null references firms(id) on delete cascade,
@@ -80,6 +96,7 @@ create policy "Members can read their firms"
       from firm_members fm
       where fm.firm_id = firms.id
         and fm.user_id = auth.uid()
+        and fm.active is true
     )
   );
 
@@ -99,6 +116,7 @@ create policy "Members can read firm data"
       from firm_members fm
       where fm.firm_id = firm_kv.firm_id
         and fm.user_id = auth.uid()
+        and fm.active is true
     )
   );
 
@@ -112,6 +130,7 @@ create policy "Members can write firm data"
       from firm_members fm
       where fm.firm_id = firm_kv.firm_id
         and fm.user_id = auth.uid()
+        and fm.active is true
     )
   )
   with check (
@@ -120,6 +139,7 @@ create policy "Members can write firm data"
       from firm_members fm
       where fm.firm_id = firm_kv.firm_id
         and fm.user_id = auth.uid()
+        and fm.active is true
     )
   );
 
@@ -201,12 +221,12 @@ begin
   where user_id = auth.uid()
   limit 1;
 
-  if not found or inviter.role not in ('owner', 'admin') then
+  if not found or inviter.active is not true or inviter.role not in ('owner', 'admin') then
     raise exception 'Only firm owners and admins can invite users.';
   end if;
 
-  if invite_role not in ('admin', 'member') then
-    raise exception 'Invite role must be admin or member.';
+  if invite_role not in ('admin', 'member', 'salesrep') then
+    raise exception 'Invite role must be admin, member, or salesrep.';
   end if;
 
   insert into firm_invites (firm_id, email, role, invited_by)
@@ -253,6 +273,17 @@ begin
 
   if found then
     if existing_membership.firm_id = invite.firm_id then
+      update firm_members
+      set active = true,
+          role = invite.role
+      where firm_id = invite.firm_id
+        and user_id = auth.uid();
+
+      update firm_invites
+      set accepted_at = now(),
+          accepted_by = auth.uid()
+      where id = invite.id;
+
       select *
       into accepted_firm
       from firms
@@ -287,6 +318,57 @@ begin
   where id = invite.firm_id;
 
   return accepted_firm;
+end;
+$$;
+
+create or replace function public.set_firm_member_active(target_user_id uuid, target_active boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  actor firm_members%rowtype;
+  target firm_members%rowtype;
+begin
+  if auth.uid() is null then
+    raise exception 'You must be signed in to manage team access.';
+  end if;
+
+  select *
+  into actor
+  from firm_members
+  where user_id = auth.uid()
+    and active is true
+  limit 1;
+
+  if not found or actor.role not in ('owner', 'admin') then
+    raise exception 'Only firm owners and admins can manage team access.';
+  end if;
+
+  select *
+  into target
+  from firm_members
+  where user_id = target_user_id
+    and firm_id = actor.firm_id
+  limit 1;
+
+  if not found then
+    raise exception 'This user is not a member of your firm.';
+  end if;
+
+  if target.role = 'owner' and target_active is false then
+    raise exception 'The firm owner cannot be removed from the workspace.';
+  end if;
+
+  if target.user_id = auth.uid() and target_active is false then
+    raise exception 'You cannot remove your own workspace access.';
+  end if;
+
+  update firm_members
+  set active = target_active
+  where firm_id = actor.firm_id
+    and user_id = target_user_id;
 end;
 $$;
 

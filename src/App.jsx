@@ -90,7 +90,11 @@ const ROLE_PERMISSIONS = {
   salesrep: { seeInsights: true, seeScorecardByPartner: false, seeAmounts: true, seeMetrics: true, usePartnerFilters: false, manageRoles: false, scopedToSelf: true },
 };
 const getPermissions = (partner) => ROLE_PERMISSIONS[partner?.role] || ROLE_PERMISSIONS.partner;
-const membershipRoleToAppRole = (role) => (role === "member" ? "admin" : "partner");
+const membershipRoleToAppRole = (role) => {
+  if (role === "member") return "admin";
+  if (role === "salesrep") return "salesrep";
+  return "partner";
+};
 const displayNameFromSession = (session) => {
   const metadata = session?.user?.user_metadata || {};
   const fromMetadata = metadata.full_name || metadata.name;
@@ -1336,7 +1340,19 @@ function useStorage(activeFirmId) {
       // ever assigned to. Existing prospects, clients, tenders, and referrals keep resolving their
       // name; this only marks them as inactive so they can be kept out of active team management
       // and restored later without data loss.
-      setPartnerActive: (partnerId, active) => {
+      setPartnerActive: async (partnerId, active) => {
+        const member = partners.find((p) => p.id === partnerId);
+        if (member?.userId && activeFirmId !== "demo") {
+          const { error } = await supabase.rpc("set_firm_member_active", {
+            target_user_id: member.userId,
+            target_active: active,
+          });
+
+          if (error) {
+            throw new Error(error.message || "Could not update this team member's access.");
+          }
+        }
+
         const next = partners.map((p) => (p.id === partnerId ? { ...p, active } : p));
         setPartners(next);
         persist("kkn-partners", next);
@@ -5013,7 +5029,7 @@ function TeamRolesPage({ store }) {
               className="chip-btn chip-ghost"
               ariaLabel={`Remove ${p.name} from the team`}
               confirmLabel="Yes, remove"
-              onConfirm={() => store.setPartnerActive(p.id, false)}
+              onConfirm={() => store.setPartnerActive(p.id, false).catch((error) => window.alert(error.message))}
             >
               Remove from team
             </ConfirmButton>
@@ -5033,7 +5049,7 @@ function TeamRolesPage({ store }) {
                   {p.name}
                   <span className="role-help-text">{ROLE_LABELS[p.role || "partner"]} — no longer active</span>
                 </span>
-                <button type="button" className="chip-btn" onClick={() => store.setPartnerActive(p.id, true)}>
+                <button type="button" className="chip-btn" onClick={() => store.setPartnerActive(p.id, true).catch((error) => window.alert(error.message))}>
                   Restore
                 </button>
               </div>
@@ -5176,6 +5192,7 @@ function FirmAccessPage({ activeFirm }) {
           <select value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="member">Office Admin</option>
             <option value="admin">Partner</option>
+            <option value="salesrep">Sales Rep</option>
           </select>
         </Field>
         <button className="btn btn-primary" type="submit" disabled={status === "saving"}>
@@ -5642,7 +5659,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       userId: sessionUserId,
       email: sessionUserEmail,
       name: displayNameFromSession(session),
-      identity: currentUserAppRole === "admin" ? "Office Admin" : "Partner",
+      identity: ROLE_LABELS[currentUserAppRole] || "Partner",
       role: currentUserAppRole,
       canExport: currentUserAppRole === "partner",
     });

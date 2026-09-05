@@ -79,7 +79,7 @@ export default function AuthGate({ children }) {
 
       const { data, error: memberError } = await supabase
         .from("firm_members")
-        .select("role, firm_id, firms(id, name, slug)")
+        .select("role, active, firm_id, firms(id, name, slug)")
         .eq("user_id", session.user.id)
         .order("created_at", { ascending: true });
 
@@ -92,11 +92,14 @@ export default function AuthGate({ children }) {
         return;
       }
 
-      const next = (data || [])
+      const allMemberships = (data || [])
         .map((m) => ({ ...m, firm: Array.isArray(m.firms) ? m.firms[0] : m.firms }))
-        .filter((m) => m.firm?.id);
+      const next = allMemberships.filter((m) => m.active !== false && m.firm?.id);
 
       setMemberships(next);
+      if (next.length === 0 && allMemberships.length > 0) {
+        setError("Your workspace access has been removed. Ask your firm owner or admin to restore your access.");
+      }
       const first = next[0] || null;
       setActiveMembership(first);
       configureStorageContext({ firmId: first?.firm.id, userId: session.user.id });
@@ -151,7 +154,7 @@ export default function AuthGate({ children }) {
       <div className="boot">
         <div className="boot-mark" aria-hidden="true">B</div>
         <h1>Bideey</h1>
-        {memberships.length === 0 ? (
+        {memberships.length === 0 && !error ? (
           <RegisterFirm onCreated={() => setRefreshKey((n) => n + 1)} />
         ) : (
           <>

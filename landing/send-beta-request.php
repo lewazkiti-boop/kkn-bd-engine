@@ -19,14 +19,31 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 //
 // This handler also supports cPanel environment variables if your hosting plan
 // lets you set them:
-// RESEND_API_KEY, BIDEEY_MAIL_TO, BIDEEY_MAIL_FROM.
-$privateConfigPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'bideey-resend-config.php';
+// RESEND_API_KEY, BIDEEY_MAIL_TO, BIDEEY_MAIL_FROM, BIDEEY_RESEND_CONFIG_PATH.
+$documentRoot = isset($_SERVER['DOCUMENT_ROOT']) ? (string)$_SERVER['DOCUMENT_ROOT'] : '';
+$configuredPath = getenv('BIDEEY_RESEND_CONFIG_PATH');
+$privateConfigCandidates = array_filter([
+    is_string($configuredPath) && trim($configuredPath) !== '' ? trim($configuredPath) : null,
+    dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . 'bideey-resend-config.php',
+    $documentRoot !== '' ? dirname($documentRoot) . DIRECTORY_SEPARATOR . 'bideey-resend-config.php' : null,
+    $documentRoot !== '' ? dirname($documentRoot, 2) . DIRECTORY_SEPARATOR . 'bideey-resend-config.php' : null,
+]);
+
+$privateConfigPath = '';
 $privateConfig = [];
-if (is_readable($privateConfigPath)) {
-    $loadedConfig = require $privateConfigPath;
-    if (is_array($loadedConfig)) {
-        $privateConfig = $loadedConfig;
+foreach ($privateConfigCandidates as $candidatePath) {
+    if (is_readable($candidatePath)) {
+        $privateConfigPath = $candidatePath;
+        $loadedConfig = require $privateConfigPath;
+        if (is_array($loadedConfig)) {
+            $privateConfig = $loadedConfig;
+        }
+        break;
     }
+}
+
+if ($privateConfigPath === '') {
+    error_log('Bideey Resend config not found. Checked: ' . implode(', ', $privateConfigCandidates));
 }
 
 function env_or_config(string $envName, array $config, string $configName, string $fallback = ''): string
