@@ -4969,7 +4969,7 @@ function NextActionTemplatesPage({ store }) {
   );
 }
 
-function TeamRolesPage({ store }) {
+function TeamRolesPage({ store, isFirmOwner = false }) {
   const activePartners = store.partners.filter((p) => p.active !== false);
   const removedPartners = store.partners.filter((p) => p.active === false);
   return (
@@ -5007,24 +5007,32 @@ function TeamRolesPage({ store }) {
           </label>
         ))}
       </div>
-      <p className="insight-note" style={{ marginTop: 14 }}>
-        Removing someone from the team does not delete anything they were assigned to. Their existing work keeps their name, but they are moved out of the active team list. Restore brings them back in one tap.
-      </p>
-      <div className="cost-table">
-        {activePartners.map((p) => (
-          <div key={p.id} className="cost-row">
-            <span className="cost-row-label">{p.name}</span>
-            <ConfirmButton
-              className="chip-btn chip-ghost"
-              ariaLabel={`Remove ${p.name} from the team`}
-              confirmLabel="Yes, remove"
-              onConfirm={() => store.setPartnerActive(p.id, false).catch((error) => window.alert(error.message))}
-            >
-              Remove from team
-            </ConfirmButton>
+      {isFirmOwner ? (
+        <>
+          <p className="insight-note" style={{ marginTop: 14 }}>
+            Removing someone from the team does not delete anything they were assigned to. Their existing work keeps their name, but they are moved out of the active team list. Restore brings them back in one tap.
+          </p>
+          <div className="cost-table">
+            {activePartners.map((p) => (
+              <div key={p.id} className="cost-row">
+                <span className="cost-row-label">{p.name}</span>
+                <ConfirmButton
+                  className="chip-btn chip-ghost"
+                  ariaLabel={`Remove ${p.name} from the team`}
+                  confirmLabel="Yes, remove"
+                  onConfirm={() => store.setPartnerActive(p.id, false).catch((error) => window.alert(error.message))}
+                >
+                  Remove from team
+                </ConfirmButton>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      ) : (
+        <p className="insight-note" style={{ marginTop: 14 }}>
+          Only the firm owner can remove or restore team members.
+        </p>
+      )}
       {removedPartners.length > 0 && (
         <>
           <div className="vault-head" style={{ marginTop: 16, marginBottom: 8 }}>
@@ -5038,9 +5046,11 @@ function TeamRolesPage({ store }) {
                   {p.name}
                   <span className="role-help-text">{ROLE_LABELS[p.role || "partner"]} — no longer active</span>
                 </span>
-                <button type="button" className="chip-btn" onClick={() => store.setPartnerActive(p.id, true).catch((error) => window.alert(error.message))}>
-                  Restore
-                </button>
+                {isFirmOwner && (
+                  <button type="button" className="chip-btn" onClick={() => store.setPartnerActive(p.id, true).catch((error) => window.alert(error.message))}>
+                    Restore
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -5089,16 +5099,16 @@ const SETTINGS_PAGES = [
   { key: "demoData", label: "Demo Data", desc: "Load or clear sample data for this workspace", Component: DemoDataSettingsPage, ownerOnly: true },
   { key: "access", label: "Invite your people", desc: "Create invite links for this firm's users", Component: FirmAccessPage, partnerOnly: true },
   { key: "region", label: "Region & Currency", desc: "Country, currency, and jurisdiction-specific terms used throughout the app", Component: RegionSettingsPage, ownerOnly: true },
-  { key: "vaultChecklist", label: "Document Checklist", desc: "What the firm needs on file before a tender or empanelment application goes out", Component: VaultChecklistSettingsPage },
+  { key: "vaultChecklist", label: "Document Checklist", desc: "What the firm needs on file before a tender or empanelment application goes out", Component: VaultChecklistSettingsPage, hideFromScopedSelf: true },
   { key: "roles", label: "Team & Roles", desc: "Who has full partner access vs Office Admin access", Component: TeamRolesPage, partnerOnly: true },
   { key: "targets", label: "Monthly BD Targets", desc: "How many touches the firm expects per activity type, per month", Component: BDTargetsPage, requiresAmounts: true, hideFromScopedSelf: true },
   { key: "myTargets", label: "My Targets", desc: "Set your own monthly targets — visible to partners, editable only by you", Component: RepTargetsPage, onlyScopedSelf: true },
-  { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage, requiresAmounts: true },
-  { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage },
-  { key: "sectors", label: "Sectors", desc: "The industry list prospects and clients get categorized under", Component: SectorsPage },
-  { key: "referralTypes", label: "Referral Types", desc: "The professions a referral partner can be tagged with", Component: ReferralTypesPage },
-  { key: "nextActions", label: "Next Action Templates", desc: "Starter phrases suggested for Next Action, by record type", Component: NextActionTemplatesPage },
-  { key: "resourcePeople", label: "Resource People", desc: "Specialist advisors and execution support to call on — not a pipeline", Component: ResourcePeoplePage },
+  { key: "cost", label: "Cost of BD", desc: "Standard estimates for what each activity typically costs", Component: CostOfBDPage, requiresAmounts: true, hideFromScopedSelf: true },
+  { key: "practices", label: "Practice Areas", desc: "The list prospects and clients get categorized under", Component: PracticeAreasPage, hideFromScopedSelf: true },
+  { key: "sectors", label: "Sectors", desc: "The industry list prospects and clients get categorized under", Component: SectorsPage, hideFromScopedSelf: true },
+  { key: "referralTypes", label: "Referral Types", desc: "The professions a referral partner can be tagged with", Component: ReferralTypesPage, hideFromScopedSelf: true },
+  { key: "nextActions", label: "Next Action Templates", desc: "Starter phrases suggested for Next Action, by record type", Component: NextActionTemplatesPage, hideFromScopedSelf: true },
+  { key: "resourcePeople", label: "Resource People", desc: "Specialist advisors and execution support to call on — not a pipeline", Component: ResourcePeoplePage, hideFromScopedSelf: true },
 ];
 
 function FirmAccessPage({ activeFirm }) {
@@ -5235,6 +5245,7 @@ function SettingsModal({ store, permissions = ROLE_PERMISSIONS.partner, me, acti
               me={me}
               activeFirm={activeFirm}
               canExport={canExport}
+              isFirmOwner={isFirmOwner}
               demoActive={demoActive}
               onLoadDemoData={onLoadDemoData}
               onClearDemoData={onClearDemoData}
@@ -5428,33 +5439,51 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   });
   const demoVisitCountedRef = useRef(false);
   const [openReferralImpact, setOpenReferralImpact] = useState(undefined); // { kind, record } | undefined
+  const myPartner = store.partners.find((p) => p.id === me);
+  const myPermissions = getPermissions(myPartner);
+  const canExport = Boolean(myPartner?.canExport || isDemo);
+  const repOwnProspects = myPermissions.scopedToSelf ? store.prospects.filter((p) => p.responsiblePartner === me) : store.prospects;
+  const repVisibleClientNames = myPermissions.scopedToSelf
+    ? new Set(repOwnProspects.map((p) => (p.organization || "").trim().toLowerCase()).filter(Boolean))
+    : null; // null means "no restriction" — used only by partners/admins
+  const scopedPartners = myPermissions.scopedToSelf && myPartner ? [myPartner] : store.partners;
+  const scopedClients = myPermissions.scopedToSelf
+    ? store.clients.filter((c) => repVisibleClientNames.has((c.name || "").trim().toLowerCase()))
+    : store.clients;
+  const scopedReferrals = myPermissions.scopedToSelf
+    ? store.referrals.filter((r) => r.responsiblePartner === me)
+    : store.referrals;
+  const scopedTenders = myPermissions.scopedToSelf
+    ? store.tenders.filter((t) => t.responsiblePartner === me)
+    : store.tenders;
+  const isFirmOwner = membershipRole === "owner";
   const occupationSuggestions = useMemo(
-    () => individualOccupations(store.clients, store.prospects),
-    [store.clients, store.prospects]
+    () => individualOccupations(scopedClients, repOwnProspects),
+    [scopedClients, repOwnProspects]
   );
   const positionSuggestionsList = useMemo(
-    () => positionSuggestions(store.clients, store.prospects),
-    [store.clients, store.prospects]
+    () => positionSuggestions(scopedClients, repOwnProspects),
+    [scopedClients, repOwnProspects]
   );
   const orgSuggestions = useMemo(
-    () => organizationSuggestions(store.clients, store.prospects),
-    [store.clients, store.prospects]
+    () => organizationSuggestions(scopedClients, repOwnProspects),
+    [scopedClients, repOwnProspects]
   );
   const prospectNextActionSuggestions = useMemo(
-    () => nextActionSuggestions(store.nextActionTemplates.prospect, store.prospects),
-    [store.nextActionTemplates, store.prospects]
+    () => nextActionSuggestions(store.nextActionTemplates.prospect, repOwnProspects),
+    [store.nextActionTemplates, repOwnProspects]
   );
   const clientNextActionSuggestions = useMemo(
-    () => nextActionSuggestions(store.nextActionTemplates.client, store.clients),
-    [store.nextActionTemplates, store.clients]
+    () => nextActionSuggestions(store.nextActionTemplates.client, scopedClients),
+    [store.nextActionTemplates, scopedClients]
   );
   const tenderNextActionSuggestions = useMemo(
-    () => nextActionSuggestions(store.nextActionTemplates.tender, store.tenders),
-    [store.nextActionTemplates, store.tenders]
+    () => nextActionSuggestions(store.nextActionTemplates.tender, scopedTenders),
+    [store.nextActionTemplates, scopedTenders]
   );
   const referralNextActionSuggestions = useMemo(
-    () => nextActionSuggestions(store.nextActionTemplates.referral, store.referrals),
-    [store.nextActionTemplates, store.referrals]
+    () => nextActionSuggestions(store.nextActionTemplates.referral, scopedReferrals),
+    [store.nextActionTemplates, scopedReferrals]
   );
 
   useEffect(() => {
@@ -5687,9 +5716,6 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     );
   }
 
-  const myPartner = store.partners.find((p) => p.id === me);
-  const myPermissions = getPermissions(myPartner);
-  const canExport = Boolean(myPartner?.canExport || isDemo);
   // REP DATA SCOPING — the one place in the app where a role restricts which records exist for
   // someone, not just which features they can use. A Sales Rep never sees another rep's or a
   // partner's prospects, tenders, or referrals — and a client is visible to them at all only once
@@ -5698,12 +5724,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   // restriction in this app — a real backend should additionally enforce this with row-level
   // security keyed to the logged-in user, not rely on the browser alone to withhold data it
   // technically already has in memory.
-  const repOwnProspects = myPermissions.scopedToSelf ? store.prospects.filter((p) => p.responsiblePartner === me) : store.prospects;
-  const repVisibleClientNames = myPermissions.scopedToSelf
-    ? new Set(repOwnProspects.map((p) => (p.organization || "").trim().toLowerCase()).filter(Boolean))
-    : null; // null means "no restriction" — used only by partners/admins
   const hasDashboardData = Boolean(store.prospects.length || store.clients.length || store.referrals.length || store.tenders.length || store.activity.length);
-  const isFirmOwner = membershipRole === "owner";
   const demoLoadOfferVisits = Number(demoLoadOfferState.visits || 0);
   const demoClearVisits = Number(demoClearPromptState.visits || 0);
   const shouldShowDemoLoadOffer =
@@ -5754,9 +5775,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     ? {
         ...store,
         prospects: repOwnProspects,
-        clients: store.clients.filter((c) => repVisibleClientNames.has((c.name || "").trim().toLowerCase())),
-        referrals: store.referrals.filter((r) => r.responsiblePartner === me),
-        tenders: store.tenders.filter((t) => t.responsiblePartner === me),
+        clients: scopedClients,
+        referrals: scopedReferrals,
+        tenders: scopedTenders,
         activity: [], // firm-wide activity-type tallies aren't any one person's to see
       }
     : store;
@@ -6256,11 +6277,11 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {openProspect !== undefined && (
         <ProspectModal
           prospect={openProspect}
-          partners={store.partners}
-          referrals={store.referrals}
-          clients={store.clients}
+          partners={scopedPartners}
+          referrals={scopedReferrals}
+          clients={scopedClients}
           prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
-          tenders={store.tenders}
+          tenders={scopedTenders}
           activity={store.activity}
           practices={store.practices}
           sectors={store.sectors}
@@ -6282,7 +6303,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {importProspectsOpen && (
         <ImportModal
           entityType="prospect"
-          existingItems={store.prospects}
+          existingItems={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           me={me}
           onImport={store.bulkImportProspects}
           onClose={() => setImportProspectsOpen(false)}
@@ -6292,9 +6313,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {openClient !== undefined && (
         <ClientModal
           item={openClient}
-          partners={store.partners}
-          clients={store.clients}
-          referrals={store.referrals}
+          partners={scopedPartners}
+          clients={scopedClients}
+          referrals={scopedReferrals}
           sectors={store.sectors}
           occupations={occupationSuggestions}
           prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
@@ -6320,7 +6341,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {importClientsOpen && (
         <ImportModal
           entityType="client"
-          existingItems={store.clients}
+          existingItems={scopedClients}
           me={me}
           onImport={store.bulkImportClients}
           onClose={() => setImportClientsOpen(false)}
@@ -6331,9 +6352,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         <ReferralModal
           item={openReferral}
           prefillName={referralPrefill}
-          partners={store.partners}
-          clients={store.clients}
-          referrals={store.referrals}
+          partners={scopedPartners}
+          clients={scopedClients}
+          referrals={scopedReferrals}
           prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           practices={store.practices}
           referralTypes={store.referralTypes}
@@ -6350,7 +6371,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {importReferralsOpen && (
         <ImportModal
           entityType="referral"
-          existingItems={store.referrals}
+          existingItems={scopedReferrals}
           me={me}
           onImport={store.bulkImportReferrals}
           onClose={() => setImportReferralsOpen(false)}
@@ -6360,8 +6381,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       {openTender !== undefined && (
         <TenderModal
           tender={openTender}
-          partners={store.partners}
-          clients={store.clients}
+          partners={scopedPartners}
+          clients={scopedClients}
           prospects={myPermissions.scopedToSelf ? repOwnProspects : store.prospects}
           nextActionSuggestions={tenderNextActionSuggestions}
           permissions={myPermissions}
@@ -7811,6 +7832,19 @@ function Scorecard({ store, me, myPartner: _myPartner, canViewByPartner = true, 
   const [viewMonth, setViewMonth] = useState(monthKey());
   const isCurrentMonth = viewMonth === monthKey();
   const mk = viewMonth;
+  const repScorecardProspects = scopedToSelf ? store.prospects.filter((p) => p.responsiblePartner === me) : store.prospects;
+  const repScorecardClientNames = scopedToSelf
+    ? new Set(repScorecardProspects.map((p) => (p.organization || "").trim().toLowerCase()).filter(Boolean))
+    : null;
+  const scorecardStore = scopedToSelf
+    ? {
+        ...store,
+        prospects: repScorecardProspects,
+        clients: store.clients.filter((c) => repScorecardClientNames.has((c.name || "").trim().toLowerCase())),
+        referrals: store.referrals.filter((r) => r.responsiblePartner === me),
+        tenders: store.tenders.filter((t) => t.responsiblePartner === me),
+      }
+    : store;
   const monthActivity = store.activity.filter((a) => monthKey(a.date) === mk && (scope === "firm" || a.partnerId === selectedPartner));
 
   const countOf = (type) => monthActivity.filter((a) => a.type === type).length;
@@ -7844,10 +7878,10 @@ function Scorecard({ store, me, myPartner: _myPartner, canViewByPartner = true, 
   const spentTrend = monthTrend(totalSpent, prevTotalSpent);
 
   const nameSet = (arr, key) => new Set(arr.map((x) => (x[key] || "").trim().toLowerCase()));
-  const prospectNames = nameSet(store.prospects, "organization");
-  const clientNames = nameSet(store.clients, "name");
-  const referralNames = nameSet(store.referrals, "name");
-  const tenderNames = nameSet(store.tenders, "title");
+  const prospectNames = nameSet(scorecardStore.prospects, "organization");
+  const clientNames = nameSet(scorecardStore.clients, "name");
+  const referralNames = nameSet(scorecardStore.referrals, "name");
+  const tenderNames = nameSet(scorecardStore.tenders, "title");
 
   // For a given activity source, which entity databases could this subject become?
   const targetsFor = (source) => {
@@ -8015,7 +8049,7 @@ function Scorecard({ store, me, myPartner: _myPartner, canViewByPartner = true, 
       </div>
 
       {logOpen && (
-        <LogActivityModal activityType={logOpen} store={store} me={me} onClose={() => setLogOpen(null)} />
+        <LogActivityModal activityType={logOpen} store={scorecardStore} me={me} onClose={() => setLogOpen(null)} />
       )}
     </main>
   );

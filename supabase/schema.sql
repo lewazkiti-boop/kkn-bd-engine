@@ -321,6 +321,8 @@ begin
 end;
 $$;
 
+drop function if exists public.set_firm_member_active(uuid, boolean);
+
 create or replace function public.set_firm_member_active(target_user_id uuid, target_active boolean)
 returns void
 language plpgsql
@@ -328,49 +330,52 @@ security definer
 set search_path = public
 as $$
 declare
-  actor firm_members%rowtype;
-  target firm_members%rowtype;
+  caller_id uuid := auth.uid();
+  caller_firm_id text;
+  caller_role text;
+  target_firm_id text;
 begin
-  if auth.uid() is null then
-    raise exception 'You must be signed in to manage team access.';
+  if caller_id is null then
+    raise exception 'Not authenticated.';
   end if;
 
-  select *
-  into actor
+  select firm_id, role
+  into caller_firm_id, caller_role
   from firm_members
-  where user_id = auth.uid()
-    and active is true
+  where user_id = caller_id
+    and active = true
   limit 1;
 
-  if not found or actor.role not in ('owner', 'admin') then
-    raise exception 'Only firm owners and admins can manage team access.';
+  if caller_firm_id is null or caller_role is distinct from 'owner' then
+    raise exception 'Only an active firm owner can change another member''s access.';
   end if;
 
-  select *
-  into target
+  if target_user_id = caller_id and target_active = false then
+    raise exception 'You cannot remove your own access this way.';
+  end if;
+
+  select firm_id
+  into target_firm_id
   from firm_members
   where user_id = target_user_id
-    and firm_id = actor.firm_id
   limit 1;
 
-  if not found then
-    raise exception 'This user is not a member of your firm.';
+  if target_firm_id is null then
+    raise exception 'No membership found for that user.';
   end if;
 
-  if target.role = 'owner' and target_active is false then
-    raise exception 'The firm owner cannot be removed from the workspace.';
-  end if;
-
-  if target.user_id = auth.uid() and target_active is false then
-    raise exception 'You cannot remove your own workspace access.';
+  if target_firm_id is distinct from caller_firm_id then
+    raise exception 'That user is not a member of your firm.';
   end if;
 
   update firm_members
   set active = target_active
-  where firm_id = actor.firm_id
+  where firm_id = caller_firm_id
     and user_id = target_user_id;
 end;
 $$;
+
+grant execute on function public.set_firm_member_active(uuid, boolean) to authenticated;
 
 insert into firms (id, name, slug)
 values ('kkn', 'KKN Law LLP', 'kkn')
