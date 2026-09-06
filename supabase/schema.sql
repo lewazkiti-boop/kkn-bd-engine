@@ -438,6 +438,33 @@ $$;
 
 grant execute on function public.set_firm_member_role(uuid, text) to authenticated;
 
+drop function if exists public.set_firm_member_role_by_email(text, text);
+
+create or replace function public.set_firm_member_role_by_email(target_email text, target_role text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_user_id uuid;
+begin
+  select id
+  into target_user_id
+  from auth.users
+  where lower(email) = lower(trim(target_email))
+  limit 1;
+
+  if target_user_id is null then
+    raise exception 'No signed-in user found for that email address.';
+  end if;
+
+  perform public.set_firm_member_role(target_user_id, target_role);
+end;
+$$;
+
+grant execute on function public.set_firm_member_role_by_email(text, text) to authenticated;
+
 insert into firms (id, name, slug)
 values ('kkn', 'KKN Law LLP', 'kkn')
 on conflict (id) do update

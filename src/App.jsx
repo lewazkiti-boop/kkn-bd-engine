@@ -1333,11 +1333,23 @@ function useStorage(activeFirmId) {
       },
       updatePartnerRole: async (partnerId, role, options = {}) => {
         const member = partners.find((p) => p.id === partnerId);
-        if (!options.localOnly && member?.userId && activeFirmId !== "demo") {
-          const { error } = await supabase.rpc("set_firm_member_role", {
-            target_user_id: member.userId,
-            target_role: appRoleToMembershipRole(role),
-          });
+        if (!options.localOnly && activeFirmId !== "demo") {
+          const targetRole = appRoleToMembershipRole(role);
+          let error = null;
+
+          if (member?.userId) {
+            ({ error } = await supabase.rpc("set_firm_member_role", {
+              target_user_id: member.userId,
+              target_role: targetRole,
+            }));
+          } else if (member?.email) {
+            ({ error } = await supabase.rpc("set_firm_member_role_by_email", {
+              target_email: member.email,
+              target_role: targetRole,
+            }));
+          } else {
+            throw new Error("This team record is not linked to a signed-in user yet, so its role cannot be changed permanently.");
+          }
 
           if (error) {
             throw new Error(error.message || "Could not update this team member's role.");
@@ -5003,6 +5015,9 @@ function TeamRolesPage({ store, isFirmOwner = false }) {
             <span className="cost-row-label">
               {p.name}
               <span className="role-help-text">{ROLE_HELP[p.role || "partner"]}</span>
+              {!p.userId && !p.email && (
+                <span className="role-help-text">Not linked to a signed-in user yet — role changes cannot persist after refresh.</span>
+              )}
             </span>
             <select value={p.role || "partner"} onChange={(e) => store.updatePartnerRole(p.id, e.target.value).catch((error) => window.alert(error.message))}>
               {Object.keys(ROLE_PERMISSIONS).map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
