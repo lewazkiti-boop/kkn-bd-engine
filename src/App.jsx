@@ -95,6 +95,11 @@ const membershipRoleToAppRole = (role) => {
   if (role === "salesrep") return "salesrep";
   return "partner";
 };
+const appRoleToMembershipRole = (role) => {
+  if (role === "admin") return "member";
+  if (role === "salesrep") return "salesrep";
+  return "admin";
+};
 const displayNameFromSession = (session) => {
   const metadata = session?.user?.user_metadata || {};
   const fromMetadata = metadata.full_name || metadata.name;
@@ -1326,7 +1331,19 @@ function useStorage(activeFirmId) {
         setPartners(next);
         persist("kkn-partners", next);
       },
-      updatePartnerRole: (partnerId, role) => {
+      updatePartnerRole: async (partnerId, role, options = {}) => {
+        const member = partners.find((p) => p.id === partnerId);
+        if (!options.localOnly && member?.userId && activeFirmId !== "demo") {
+          const { error } = await supabase.rpc("set_firm_member_role", {
+            target_user_id: member.userId,
+            target_role: appRoleToMembershipRole(role),
+          });
+
+          if (error) {
+            throw new Error(error.message || "Could not update this team member's role.");
+          }
+        }
+
         const next = partners.map((p) => (p.id === partnerId ? { ...p, role } : p));
         setPartners(next);
         persist("kkn-partners", next);
@@ -4987,7 +5004,7 @@ function TeamRolesPage({ store, isFirmOwner = false }) {
               {p.name}
               <span className="role-help-text">{ROLE_HELP[p.role || "partner"]}</span>
             </span>
-            <select value={p.role || "partner"} onChange={(e) => store.updatePartnerRole(p.id, e.target.value)}>
+            <select value={p.role || "partner"} onChange={(e) => store.updatePartnerRole(p.id, e.target.value).catch((error) => window.alert(error.message))}>
               {Object.keys(ROLE_PERMISSIONS).map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
             </select>
           </div>
@@ -5677,7 +5694,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
 
     if (existing) {
       if ((existing.role || "partner") !== currentUserAppRole) {
-        store.updatePartnerRole(existing.id, currentUserAppRole);
+        store.updatePartnerRole(existing.id, currentUserAppRole, { localOnly: true });
       }
       setMe(existing.id);
       return;

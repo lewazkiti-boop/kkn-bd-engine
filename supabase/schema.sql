@@ -377,6 +377,67 @@ $$;
 
 grant execute on function public.set_firm_member_active(uuid, boolean) to authenticated;
 
+drop function if exists public.set_firm_member_role(uuid, text);
+
+create or replace function public.set_firm_member_role(target_user_id uuid, target_role text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  caller_id uuid := auth.uid();
+  caller_firm_id text;
+  caller_role text;
+  target_firm_id text;
+begin
+  if caller_id is null then
+    raise exception 'Not authenticated.';
+  end if;
+
+  if target_role not in ('admin', 'member', 'salesrep') then
+    raise exception 'Role must be partner, office admin, or sales rep.';
+  end if;
+
+  select firm_id, role
+  into caller_firm_id, caller_role
+  from firm_members
+  where user_id = caller_id
+    and active = true
+  limit 1;
+
+  if caller_firm_id is null or caller_role is distinct from 'owner' then
+    raise exception 'Only an active firm owner can change member roles.';
+  end if;
+
+  if target_user_id = caller_id then
+    raise exception 'You cannot change your own owner role this way.';
+  end if;
+
+  select firm_id
+  into target_firm_id
+  from firm_members
+  where user_id = target_user_id
+  limit 1;
+
+  if target_firm_id is null then
+    raise exception 'No membership found for that user.';
+  end if;
+
+  if target_firm_id is distinct from caller_firm_id then
+    raise exception 'That user is not a member of your firm.';
+  end if;
+
+  update firm_members
+  set role = target_role
+  where firm_id = caller_firm_id
+    and user_id = target_user_id
+    and role <> 'owner';
+end;
+$$;
+
+grant execute on function public.set_firm_member_role(uuid, text) to authenticated;
+
 insert into firms (id, name, slug)
 values ('kkn', 'KKN Law LLP', 'kkn')
 on conflict (id) do update
