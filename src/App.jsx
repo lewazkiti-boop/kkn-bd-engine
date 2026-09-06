@@ -78,7 +78,7 @@ const ROLE_LABELS = { partner: "Partner", admin: "Office Admin", salesrep: "Sale
 const ROLE_HELP = {
   partner: "Full access — pipeline, tenders, clients, referrals, Scorecard, and Insights.",
   admin: "Adds and updates records — clients, tenders, prospects, referrals — without seeing money, performance figures, or partner-by-partner views. Can't filter by partner either.",
-  salesrep: "For people bringing in work who aren't firm staff — sees only their own pipeline, tenders, and performance. A client or referral partner is visible to them only once they've personally logged work against it, and even then only their own contribution, never the client's full history with the firm. Sets their own targets rather than the firm-wide ones.",
+  salesrep: "For people bringing in work who aren't firm staff — sees only records assigned to them: their own prospects, clients, referral partners, tenders, activity, and performance. Sets their own targets rather than the firm-wide ones.",
 };
 const ROLE_PERMISSIONS = {
   partner: { seeInsights: true, seeScorecardByPartner: true, seeAmounts: true, seeMetrics: true, usePartnerFilters: true, manageRoles: true, scopedToSelf: false },
@@ -5443,12 +5443,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const myPermissions = getPermissions(myPartner);
   const canExport = Boolean(myPartner?.canExport || isDemo);
   const repOwnProspects = myPermissions.scopedToSelf ? store.prospects.filter((p) => p.responsiblePartner === me) : store.prospects;
-  const repVisibleClientNames = myPermissions.scopedToSelf
-    ? new Set(repOwnProspects.map((p) => (p.organization || "").trim().toLowerCase()).filter(Boolean))
-    : null; // null means "no restriction" — used only by partners/admins
   const scopedPartners = myPermissions.scopedToSelf && myPartner ? [myPartner] : store.partners;
   const scopedClients = myPermissions.scopedToSelf
-    ? store.clients.filter((c) => repVisibleClientNames.has((c.name || "").trim().toLowerCase()))
+    ? store.clients.filter((c) => c.responsiblePartner === me)
     : store.clients;
   const scopedReferrals = myPermissions.scopedToSelf
     ? store.referrals.filter((r) => r.responsiblePartner === me)
@@ -5456,6 +5453,20 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const scopedTenders = myPermissions.scopedToSelf
     ? store.tenders.filter((t) => t.responsiblePartner === me)
     : store.tenders;
+  const scopedActivity = myPermissions.scopedToSelf
+    ? store.activity.filter((a) => a.partnerId === me)
+    : store.activity;
+  const scopedStore = myPermissions.scopedToSelf
+    ? {
+        ...store,
+        partners: scopedPartners,
+        prospects: repOwnProspects,
+        clients: scopedClients,
+        referrals: scopedReferrals,
+        tenders: scopedTenders,
+        activity: scopedActivity,
+      }
+    : store;
   const isFirmOwner = membershipRole === "owner";
   const occupationSuggestions = useMemo(
     () => individualOccupations(scopedClients, repOwnProspects),
@@ -5717,10 +5728,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   }
 
   // REP DATA SCOPING — the one place in the app where a role restricts which records exist for
-  // someone, not just which features they can use. A Sales Rep never sees another rep's or a
-  // partner's prospects, tenders, or referrals — and a client is visible to them at all only once
-  // they've personally logged a matter against it, scoped to their own contribution, never the
-  // client's full history with the firm. This is a UI-level filter, same as every other role
+  // someone, not just which features they can use. A Sales Rep sees only records assigned to them:
+  // their own prospects, clients, referral partners, tenders, activity, and derived performance.
+  // This is a UI-level filter, same as every other role
   // restriction in this app — a real backend should additionally enforce this with row-level
   // security keyed to the logged-in user, not rely on the browser alone to withhold data it
   // technically already has in memory.
@@ -5778,7 +5788,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         clients: scopedClients,
         referrals: scopedReferrals,
         tenders: scopedTenders,
-        activity: [], // firm-wide activity-type tallies aren't any one person's to see
+        activity: scopedActivity,
       }
     : store;
   const feed = computeUnseenFeed(feedStore);
@@ -5920,7 +5930,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                 type="button"
                 className="mini-btn"
                 disabled={exportingType === "prospect"}
-                onClick={() => { setExportingType("prospect"); exportEntityToXlsx("prospect", store).finally(() => setExportingType(null)); }}
+                onClick={() => { setExportingType("prospect"); exportEntityToXlsx("prospect", scopedStore).finally(() => setExportingType(null)); }}
               >
                 {exportingType === "prospect" ? "Exporting…" : "⬇ Export leads"}
               </button>
@@ -5951,8 +5961,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                     <ProspectCard
                       key={p.id}
                       p={p}
-                      partners={store.partners}
-                      clients={store.clients}
+                      partners={scopedPartners}
+                      clients={scopedClients}
                       seenMap={store.seenProspects}
                       onOpen={setOpenProspect}
                       permissions={myPermissions}
@@ -5973,8 +5983,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                     <ProspectCard
                       key={p.id}
                       p={p}
-                      partners={store.partners}
-                      clients={store.clients}
+                      partners={scopedPartners}
+                      clients={scopedClients}
                       seenMap={store.seenProspects}
                       onOpen={setOpenProspect}
                       permissions={myPermissions}
@@ -5999,7 +6009,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           .filter((t) => !myPermissions.scopedToSelf || t.responsiblePartner === me).length, 0);
         return (
         <main className="content">
-          <VaultChecklist vault={store.vault} items={store.vaultChecklist} onToggle={store.toggleVaultItem} permissions={myPermissions} />
+          {!myPermissions.scopedToSelf && (
+            <VaultChecklist vault={store.vault} items={store.vaultChecklist} onToggle={store.toggleVaultItem} permissions={myPermissions} />
+          )}
 
           <p className="section-intro" style={{ marginTop: 16 }}>
             Score every opportunity before committing resources. A disciplined firm wins partly by knowing which tenders not to pursue.
@@ -6051,7 +6063,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                       <TenderCard
                         key={t.id}
                         t={t}
-                        partners={store.partners}
+                        partners={scopedPartners}
                         seenMap={store.seenTenders}
                         onOpen={setOpenTender}
                         permissions={myPermissions}
@@ -6072,7 +6084,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                       <TenderCard
                         key={t.id}
                         t={t}
-                        partners={store.partners}
+                        partners={scopedPartners}
                         seenMap={store.seenTenders}
                         onOpen={setOpenTender}
                         permissions={myPermissions}
@@ -6094,7 +6106,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         const visibleClients = store.clients
           .filter((c) => matchesSearch(searchClients, [c.name, c.sector, c.instructedOn, c.potentialNeeds, c.origin]))
           .filter((c) => filterClientsPartner === "all" || c.responsiblePartner === filterClientsPartner)
-          .filter((c) => !myPermissions.scopedToSelf || repVisibleClientNames.has((c.name || "").trim().toLowerCase()))
+          .filter((c) => !myPermissions.scopedToSelf || c.responsiblePartner === me)
           .slice()
           .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         return (
@@ -6118,7 +6130,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                 type="button"
                 className="mini-btn"
                 disabled={exportingType === "client"}
-                onClick={() => { setExportingType("client"); exportEntityToXlsx("client", store).finally(() => setExportingType(null)); }}
+                onClick={() => { setExportingType("client"); exportEntityToXlsx("client", scopedStore).finally(() => setExportingType(null)); }}
               >
                 {exportingType === "client" ? "Exporting…" : "⬇ Export clients"}
               </button>
@@ -6128,13 +6140,13 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             )}
           </div>
           <div className="card-list">
-            {store.clients.length === 0 && <p className="empty">No clients logged yet.</p>}
+            {visibleClients.length === 0 && <p className="empty">No clients logged yet.</p>}
             {visibleClients
               .map((c) => {
-                const owner = store.partners.find((x) => x.id === c.responsiblePartner);
+                const owner = scopedPartners.find((x) => x.id === c.responsiblePartner);
                 const stale = c.lastContact && daysBetween(c.lastContact, todayISO()) >= 60;
                 const unseen = clientActivityCount(c) - (store.seenClients[c.id] || 0);
-                const impact = referralImpact("client", c.id, store);
+                const impact = referralImpact("client", c.id, scopedStore);
                 return (
                   <button key={c.id} className="card" onClick={() => setOpenClient(c)}>
                     <div className="card-top">
@@ -6196,7 +6208,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                 type="button"
                 className="mini-btn"
                 disabled={exportingType === "referral"}
-                onClick={() => { setExportingType("referral"); exportEntityToXlsx("referral", store).finally(() => setExportingType(null)); }}
+                onClick={() => { setExportingType("referral"); exportEntityToXlsx("referral", scopedStore).finally(() => setExportingType(null)); }}
               >
                 {exportingType === "referral" ? "Exporting…" : "⬇ Export referral partners"}
               </button>
@@ -6206,13 +6218,13 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             )}
           </div>
           <div className="card-list">
-            {store.referrals.length === 0 && <p className="empty">No referral partners logged yet.</p>}
+            {visibleReferrals.length === 0 && <p className="empty">No referral partners logged yet.</p>}
             {visibleReferrals
               .map((r) => {
                 const silent = r.lastContact && daysBetween(r.lastContact, todayISO()) >= 30;
                 const unseen = referralActivityCount(r) - (store.seenReferrals[r.id] || 0);
-                const owner = store.partners.find((p) => p.id === r.responsiblePartner);
-                const impact = referralImpact("referral", r.id, store);
+                const owner = scopedPartners.find((p) => p.id === r.responsiblePartner);
+                const impact = referralImpact("referral", r.id, scopedStore);
                 const practiceFedTags = Array.isArray(r.practiceFed) ? r.practiceFed : (r.practiceFed ? [r.practiceFed] : []);
                 return (
                   <button key={r.id} className="card" onClick={() => setOpenReferral(r)}>
@@ -6272,7 +6284,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         />
       )}
 
-      {tab === "insights" && myPermissions.seeInsights && <Insights store={store} me={me} permissions={myPermissions} />}
+      {tab === "insights" && myPermissions.seeInsights && <Insights store={scopedStore} me={me} permissions={myPermissions} />}
 
       {openProspect !== undefined && (
         <ProspectModal
@@ -6461,7 +6473,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         <ReferralImpactPanel
           kind={openReferralImpact.kind}
           record={openReferralImpact.record}
-          store={store}
+          store={scopedStore}
           onOpenProspect={(p) => { setOpenReferralImpact(undefined); setOpenProspect(p); }}
           onClose={() => setOpenReferralImpact(undefined)}
         />
