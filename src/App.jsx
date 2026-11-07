@@ -1291,9 +1291,16 @@ function useStorage(activeFirmId) {
       },
       saveReferral: (r) => {
         const exists = referrals.some((x) => x.id === r.id);
+        // Stars are only ever changed through toggleReferralStar, so a form opened before
+        // someone starred this record can't undo that star when it's saved.
         const next = exists
-          ? referrals.map((x) => (x.id === r.id ? r : x))
+          ? referrals.map((x) => (x.id === r.id ? { ...r, starredBy: x.starredBy || [] } : x))
           : [...referrals, { firmId: r.firmId || activeFirmId, ...r }];
+        setReferrals(next);
+        persist("kkn-referrals", next);
+      },
+      toggleReferralStar: (id, partnerId) => {
+        const next = referrals.map((x) => (x.id === id ? { ...x, starredBy: toggleInList(x.starredBy, partnerId) } : x));
         setReferrals(next);
         persist("kkn-referrals", next);
       },
@@ -1420,7 +1427,15 @@ function useStorage(activeFirmId) {
       },
       saveClient: (c) => {
         const exists = clients.some((x) => x.id === c.id);
-        const next = exists ? clients.map((x) => (x.id === c.id ? c : x)) : [...clients, { firmId: c.firmId || activeFirmId, ...c }];
+        // Stars are only ever changed through toggleClientStar (see saveReferral).
+        const next = exists
+          ? clients.map((x) => (x.id === c.id ? { ...c, starredBy: x.starredBy || [] } : x))
+          : [...clients, { firmId: c.firmId || activeFirmId, ...c }];
+        setClients(next);
+        persist("kkn-clients", next);
+      },
+      toggleClientStar: (id, partnerId) => {
+        const next = clients.map((x) => (x.id === id ? { ...x, starredBy: toggleInList(x.starredBy, partnerId) } : x));
         setClients(next);
         persist("kkn-clients", next);
       },
@@ -1584,6 +1599,33 @@ const effectiveDealValue = (p) => {
   }
   return Number(p.estimatedFee) || 0;
 };
+// Personal priority stars. Each record keeps the list of partners who starred it, so a star
+// follows that partner across their devices but never reorders anyone else's list.
+const toggleInList = (list, value) => {
+  const arr = Array.isArray(list) ? list : [];
+  return arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value];
+};
+const isStarredBy = (record, partnerId) => Array.isArray(record?.starredBy) && record.starredBy.includes(partnerId);
+// Starred first; the list's normal order is kept inside each group.
+const starredFirst = (partnerId, compare) => (a, b) => {
+  const sa = isStarredBy(a, partnerId) ? 0 : 1;
+  const sb = isStarredBy(b, partnerId) ? 0 : 1;
+  return sa !== sb ? sa - sb : compare(a, b);
+};
+function StarButton({ starred, onToggle, label }) {
+  return (
+    <button
+      type="button"
+      className={`star-btn ${starred ? "star-on" : ""}`}
+      aria-pressed={starred}
+      aria-label={starred ? `Unstar ${label}` : `Star ${label} to keep it at the top`}
+      title={starred ? "Starred — kept at the top of your list" : "Star to keep at the top of your list"}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+    >
+      {starred ? "★" : "☆"}
+    </button>
+  );
+}
 const clientActivityCount = (c) => c.notesHistory?.length || 0;
 const referralActivityCount = (r) => r.notesHistory?.length || 0;
 const tenderActivityCount = (t) => (t.stageHistory?.length || 0) + (t.notesHistory?.length || 0);
@@ -2449,7 +2491,8 @@ const REFERRAL_VOICE_FIELDS = [
 // ---------------------------------------------------------------------------------------------
 const draftKey = (kind, item) => `draft:${kind}:${item?.id || "new"}`;
 function fingerprint(value) {
-  const str = JSON.stringify(value ?? null);
+  // Stars don't affect the form, so starring a record never invalidates someone's draft of it.
+  const str = JSON.stringify(value && typeof value === "object" ? { ...value, starredBy: undefined } : value ?? null);
   let h = 5381;
   for (let i = 0; i < str.length; i += 1) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
   return String(h);
@@ -5515,7 +5558,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           .filter((c) => matchesFilter(filterClientsSector, asList(c.sector)))
           .filter((c) => matchesFilter(filterClientsPractice, clientPracticeAreas(c, store.prospects)))
           .slice()
-          .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+          .sort(starredFirst(me, (a, b) => (a.name || "").localeCompare(b.name || "")));
+        const starredClientCount = store.clients.filter((c) => isStarredBy(c, me)).length;
         return (
         <main className="content">
           <p className="section-intro">
@@ -5562,6 +5606,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             {myPermissions.seeMetrics && (
               <span className="list-count">{visibleClients.length} client{visibleClients.length === 1 ? "" : "s"}</span>
             )}
+            {starredClientCount > 0 && <span className="list-count star-count">★ {starredClientCount} starred</span>}
           </div>
           <div className="card-list">
             {store.clients.length === 0 && <p className="empty">No clients logged yet.</p>}
@@ -5578,6 +5623,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                   <button key={c.id} className="card" onClick={() => setOpenClient(c)}>
                     <div className="card-top">
                       <span className="org">{c.name}</span>
+                      <StarButton starred={isStarredBy(c, me)} label={c.name} onToggle={() => store.toggleClientStar(c.id, me)} />
                     </div>
                     <div className="card-meta">
                       {c.sector && <Pill>{c.sector}</Pill>}
@@ -5617,7 +5663,8 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           .filter((r) => matchesFilter(filterReferralsRole, asList(r.type)))
           .filter((r) => matchesFilter(filterReferralsPractice, asList(r.practiceFed)))
           .slice()
-          .sort((a, b) => (a.lastContact || "") < (b.lastContact || "") ? -1 : 1);
+          .sort(starredFirst(me, (a, b) => ((a.lastContact || "") < (b.lastContact || "") ? -1 : 1)));
+        const starredReferralCount = store.referrals.filter((r) => isStarredBy(r, me)).length;
         return (
         <main className="content">
           <p className="section-intro">
@@ -5664,6 +5711,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
             {myPermissions.seeMetrics && (
               <span className="list-count">{visibleReferrals.length} referral partner{visibleReferrals.length === 1 ? "" : "s"}</span>
             )}
+            {starredReferralCount > 0 && <span className="list-count star-count">★ {starredReferralCount} starred</span>}
           </div>
           <div className="card-list">
             {store.referrals.length === 0 && <p className="empty">No referral partners logged yet.</p>}
@@ -5681,6 +5729,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                   <button key={r.id} className="card" onClick={() => setOpenReferral(r)}>
                     <div className="card-top">
                       <span className="org">{referralDisplayName(r)}</span>
+                      <StarButton starred={isStarredBy(r, me)} label={r.name} onToggle={() => store.toggleReferralStar(r.id, me)} />
                     </div>
                     <div className="card-meta">
                       {r.type && <Pill>{r.type}</Pill>}
@@ -7577,6 +7626,10 @@ export function Style() {
 
       .card{ text-align:left; background:#fff; border:1px solid var(--line); border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; }
       .card-top{ display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
+      .star-btn{ flex:none; align-self:flex-start; margin:-8px -8px 0 0; width:40px; height:40px; display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; font-size:22px; line-height:1; color:#B8B0A0; cursor:pointer; border-radius:50%; }
+      .star-btn:hover{ background:rgba(200,155,60,.12); }
+      .star-btn.star-on{ color:var(--gold); }
+      .star-count{ color:var(--gold); font-weight:600; }
       .org{ font-weight:700; font-size:14.5px; min-width:0; overflow-wrap:break-word; }
       .fee{ font-size:12.5px; color:var(--muted); white-space:nowrap; flex:0 0 auto; }
       .rail-row{ display:flex; align-items:center; gap:8px; }
