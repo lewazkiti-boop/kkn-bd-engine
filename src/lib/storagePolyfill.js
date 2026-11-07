@@ -29,6 +29,52 @@ export function configureStorageContext({ firmId, userId } = {}) {
 const localKey = (key) => `${LOCAL_PREFIX}${activeFirmId || "no-firm"}:${activeUserId || "anonymous"}:${key}`;
 const demoKey = (key) => `${DEMO_PREFIX}${activeFirmId || "demo"}:${key}`;
 
+/**
+ * Synchronous, per-device storage for in-progress UI state (form drafts, which tab/form was
+ * open). Lives only in this browser, namespaced by firm and user like the shared=false keys
+ * above, so it never syncs to other partners and survives iOS Safari unloading the page in the
+ * background. Every call is wrapped in try/catch: private browsing or blocked storage just means
+ * nothing is remembered, never a crash.
+ */
+export const deviceState = {
+  get(key) {
+    try {
+      const raw = window.localStorage.getItem(localKey(key));
+      return raw === null ? null : JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  },
+  set(key, value) {
+    try {
+      window.localStorage.setItem(localKey(key), JSON.stringify(value));
+    } catch {
+      /* storage full or blocked — drafts are best-effort */
+    }
+  },
+  remove(key) {
+    try {
+      window.localStorage.removeItem(localKey(key));
+    } catch {
+      /* ignore */
+    }
+  },
+  // Remove every key for the current firm/user that starts with `prefix` (e.g. on sign-out).
+  clearPrefix(prefix) {
+    try {
+      const full = localKey(prefix);
+      const doomed = [];
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const k = window.localStorage.key(i);
+        if (k && k.startsWith(full)) doomed.push(k);
+      }
+      doomed.forEach((k) => window.localStorage.removeItem(k));
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
 function requireFirm() {
   if (!activeFirmId) {
     throw new Error("No active firm selected for shared storage.");
