@@ -1709,6 +1709,47 @@ function Pill({ children, tone }) {
   return <span className={`pill ${tone || ""}`}>{children}</span>;
 }
 
+// Filter helpers for the Clients and Referral partners tabs. Values are free text in places
+// (sector, referral type), so grouping is case- and whitespace-insensitive: "Tax", "tax " and
+// "TAX" all land in one option. Only values that actually appear in the data are offered, each
+// with the number of records it would show.
+const filterKey = (v) => (v || "").trim().toLowerCase();
+const asList = (v) => (Array.isArray(v) ? v : v ? [v] : []).map((x) => (x || "").trim()).filter(Boolean);
+function buildFilterOptions(items, getValues) {
+  const groups = new Map();
+  for (const item of items) {
+    const seen = new Set();
+    for (const raw of getValues(item)) {
+      const key = filterKey(raw);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const g = groups.get(key) || { value: key, label: raw.trim(), count: 0 };
+      g.count += 1;
+      groups.set(key, g);
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+const matchesFilter = (selected, values) => selected === "all" || values.some((v) => filterKey(v) === selected);
+// A client's practice areas come from its matters in the pipeline (prospects under the same name),
+// since the client record itself has no practice-area field.
+const clientPracticeAreas = (client, prospects) => clientMatters(client.name, prospects).map((p) => p.practiceArea);
+
+function FilterSelect({ value, onChange, allLabel, options, showCounts }) {
+  // If the selected value no longer exists in the data (record edited or deleted), still show it
+  // so the dropdown doesn't silently display "All" while a filter is quietly active.
+  const missing = value !== "all" && !options.some((o) => o.value === value);
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={value !== "all" ? "filter-active" : ""}>
+      <option value="all">{allLabel}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{showCounts ? `${o.label} (${o.count})` : o.label}</option>
+      ))}
+      {missing && <option value={value}>{value} (0)</option>}
+    </select>
+  );
+}
+
 function SearchBox({ value, onChange, placeholder }) {
   return (
     <div className="search-box-wrap">
@@ -4699,6 +4740,10 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   const [filterTendersPartner, setFilterTendersPartner] = useState("all");
   const [filterClientsPartner, setFilterClientsPartner] = useState("all");
   const [filterReferralsPartner, setFilterReferralsPartner] = useState("all");
+  const [filterClientsSector, setFilterClientsSector] = useState("all");
+  const [filterClientsPractice, setFilterClientsPractice] = useState("all");
+  const [filterReferralsRole, setFilterReferralsRole] = useState("all");
+  const [filterReferralsPractice, setFilterReferralsPractice] = useState("all");
   const [searchPipeline, setSearchPipeline] = useState("");
   const [searchTenders, setSearchTenders] = useState("");
   const [searchClients, setSearchClients] = useState("");
@@ -5355,9 +5400,14 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       })()}
 
       {tab === "clients" && (() => {
+        const clientSectorOptions = buildFilterOptions(store.clients, (c) => asList(c.sector));
+        const clientPracticeOptions = buildFilterOptions(store.clients, (c) => clientPracticeAreas(c, store.prospects));
+        const clientFiltersActive = filterClientsSector !== "all" || filterClientsPractice !== "all";
         const visibleClients = store.clients
           .filter((c) => matchesSearch(searchClients, [c.name, c.sector, c.instructedOn, c.potentialNeeds, c.origin]))
           .filter((c) => filterClientsPartner === "all" || c.responsiblePartner === filterClientsPartner)
+          .filter((c) => matchesFilter(filterClientsSector, asList(c.sector)))
+          .filter((c) => matchesFilter(filterClientsPractice, clientPracticeAreas(c, store.prospects)))
           .slice()
           .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
         return (
@@ -5374,6 +5424,23 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            )}
+            <FilterSelect
+              value={filterClientsSector}
+              onChange={setFilterClientsSector}
+              allLabel="All sectors"
+              options={clientSectorOptions}
+              showCounts={myPermissions.seeMetrics}
+            />
+            <FilterSelect
+              value={filterClientsPractice}
+              onChange={setFilterClientsPractice}
+              allLabel="All practice areas"
+              options={clientPracticeOptions}
+              showCounts={myPermissions.seeMetrics}
+            />
+            {clientFiltersActive && (
+              <button type="button" className="mini-btn" onClick={() => { setFilterClientsSector("all"); setFilterClientsPractice("all"); }}>✕ Clear filters</button>
             )}
             <button type="button" className="mini-btn" onClick={() => setImportClientsOpen(true)}>📄 Import clients</button>
             {canExport && (
@@ -5392,6 +5459,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           </div>
           <div className="card-list">
             {store.clients.length === 0 && <p className="empty">No clients logged yet.</p>}
+            {store.clients.length > 0 && visibleClients.length === 0 && (
+              <p className="empty">No clients match these filters.</p>
+            )}
             {visibleClients
               .map((c) => {
                 const owner = store.partners.find((x) => x.id === c.responsiblePartner);
@@ -5432,9 +5502,14 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       })()}
 
       {tab === "referrals" && (() => {
+        const referralRoleOptions = buildFilterOptions(store.referrals, (r) => asList(r.type));
+        const referralPracticeOptions = buildFilterOptions(store.referrals, (r) => asList(r.practiceFed));
+        const referralFiltersActive = filterReferralsRole !== "all" || filterReferralsPractice !== "all";
         const visibleReferrals = store.referrals
           .filter((r) => matchesSearch(searchReferrals, [r.name, r.type, ...(Array.isArray(r.practiceFed) ? r.practiceFed : [r.practiceFed])]))
           .filter((r) => filterReferralsPartner === "all" || r.responsiblePartner === filterReferralsPartner)
+          .filter((r) => matchesFilter(filterReferralsRole, asList(r.type)))
+          .filter((r) => matchesFilter(filterReferralsPractice, asList(r.practiceFed)))
           .slice()
           .sort((a, b) => (a.lastContact || "") < (b.lastContact || "") ? -1 : 1);
         return (
@@ -5451,6 +5526,23 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
+            )}
+            <FilterSelect
+              value={filterReferralsRole}
+              onChange={setFilterReferralsRole}
+              allLabel="All roles"
+              options={referralRoleOptions}
+              showCounts={myPermissions.seeMetrics}
+            />
+            <FilterSelect
+              value={filterReferralsPractice}
+              onChange={setFilterReferralsPractice}
+              allLabel="All practice areas"
+              options={referralPracticeOptions}
+              showCounts={myPermissions.seeMetrics}
+            />
+            {referralFiltersActive && (
+              <button type="button" className="mini-btn" onClick={() => { setFilterReferralsRole("all"); setFilterReferralsPractice("all"); }}>✕ Clear filters</button>
             )}
             <button type="button" className="mini-btn" onClick={() => setImportReferralsOpen(true)}>📄 Import referral partners</button>
             {canExport && (
@@ -5469,6 +5561,9 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           </div>
           <div className="card-list">
             {store.referrals.length === 0 && <p className="empty">No referral partners logged yet.</p>}
+            {store.referrals.length > 0 && visibleReferrals.length === 0 && (
+              <p className="empty">No referral partners match these filters.</p>
+            )}
             {visibleReferrals
               .map((r) => {
                 const silent = r.lastContact && daysBetween(r.lastContact, todayISO()) >= 30;
@@ -7355,6 +7450,8 @@ export function Style() {
       .search-clear{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:13px; padding:4px; }
       .filter-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
       .filter-row select{ padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; font-family:inherit; font-size:13px; }
+      .filter-row select.filter-active{ border-color:var(--ink, #111); font-weight:600; }
+      @media (max-width:520px){ .filter-row select{ flex:1 1 calc(50% - 10px); min-width:0; max-width:100%; } }
       .overdue-banner{ background:#F7E3E3; color:var(--red); font-size:12px; font-weight:600; padding:5px 10px; border-radius:999px; }
       .list-count{ font-size:12px; color:var(--muted); font-weight:600; padding:5px 2px; margin-left:auto; }
 
