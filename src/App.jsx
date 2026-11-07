@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "./lib/supabaseClient";
+import { deviceState } from "./lib/storagePolyfill";
 
 /* ------------------------------------------------------------------ *
  *  Bideey — shared BD pipeline for law-firm teams
@@ -2435,8 +2436,68 @@ const REFERRAL_VOICE_FIELDS = [
   { key: "notes", label: "Notes", placeholder: "Context" },
 ];
 
+// ---------------------------------------------------------------------------------------------
+// Unsaved-form drafts. iOS Safari often unloads a page while you're in another app, so coming
+// back reloads the app from scratch. Every record form (prospect, client, referral partner,
+// tender) keeps its in-progress fields on this device as you type, and puts them back when the
+// same form is reopened — after a reload, or after an accidental tap outside the sheet. A draft
+// is removed only when the record is saved or deleted, or the person taps "Discard draft".
+//
+// Drafts of an EXISTING record remember a fingerprint of the record they started from. If that
+// record has since changed (say another partner added a note), the stale draft is dropped rather
+// than restored, so saving it can never silently overwrite someone else's newer work.
+// ---------------------------------------------------------------------------------------------
+const draftKey = (kind, item) => `draft:${kind}:${item?.id || "new"}`;
+function fingerprint(value) {
+  const str = JSON.stringify(value ?? null);
+  let h = 5381;
+  for (let i = 0; i < str.length; i += 1) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return String(h);
+}
+function useFormDraft(kind, item, buildInitial) {
+  const key = draftKey(kind, item);
+  const [initial] = useState(buildInitial);
+  // Read the saved draft once, synchronously, so the very first render already shows it.
+  const [start] = useState(() => {
+    const saved = deviceState.get(key);
+    if (!saved || !saved.f) return { f: initial, restored: false };
+    if (item && saved.base !== fingerprint(item)) {
+      deviceState.remove(key);
+      return { f: initial, restored: false };
+    }
+    // Merge over the fresh initial so fields added to the form later still get defaults.
+    const f = { ...initial, ...saved.f };
+    return { f, restored: JSON.stringify(f) !== JSON.stringify(initial) };
+  });
+  const [f, setF] = useState(start.f);
+  const [restored, setRestored] = useState(start.restored);
+  const initialJson = useMemo(() => JSON.stringify(initial), [initial]);
+  useEffect(() => {
+    // Only keep a draft once something has actually been typed or changed.
+    if (JSON.stringify(f) === initialJson) deviceState.remove(key);
+    else deviceState.set(key, { f, base: item ? fingerprint(item) : null, savedAt: Date.now() });
+  }, [f, initialJson, key, item]);
+  const clearDraft = useCallback(() => deviceState.remove(key), [key]);
+  const discardDraft = useCallback(() => {
+    deviceState.remove(key);
+    setRestored(false);
+    setF(initial);
+  }, [key, initial]);
+  return [f, setF, { restored, clearDraft, discardDraft }];
+}
+
+function DraftBanner({ draft }) {
+  if (!draft.restored) return null;
+  return (
+    <div className="draft-banner" role="status">
+      <span>📝 Unsaved draft restored — carry on where you left off.</span>
+      <button type="button" className="mini-btn" onClick={draft.discardDraft}>Discard draft</button>
+    </div>
+  );
+}
+
 function ProspectModal({ prospect, partners, referrals, clients, prospects, tenders, activity, practices, sectors, occupations, organizations, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillOrg, onSave, onDelete, onClose, markSeen, getDayLoad }) {
-  const [f, setF] = useState(
+  const [f, setF, draft] = useFormDraft("prospect", prospect, () => (
     prospect
       ? {
           ...prospect,
@@ -2475,7 +2536,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           notesHistory: [],
           statusHistory: [],
         }
-  );
+  ));
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const [saveError, setSaveError] = useState("");
   useEffect(() => {
@@ -2520,7 +2581,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
   // into a compact summary — Pipeline stage, Probability, Relationship strength, Last contact, Next
   // action, and everything Won-related stay live below, since those are what actually move as a
   // deal progresses. New prospects have nothing to summarize yet, so start expanded.
-  const [editingDetails, setEditingDetails] = useState(!prospect);
+  const [editingDetails, setEditingDetails] = useState(!prospect || draft.restored);
 
   // When the organization just typed matches an existing client, pull contact details forward
   // from that client's most recent matter — same institution, likely the same or a related contact
@@ -2557,6 +2618,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
+          <DraftBanner draft={draft} />
           {!editingDetails ? (
             <div className="record-summary">
               <div className="record-summary-top">
@@ -2877,7 +2939,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
         <div className="sheet-actions">
           {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {prospect && (
-            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); draft.clearDraft(); onClose(); }}>
               Delete
             </ConfirmButton>
           )}
@@ -2905,6 +2967,7 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
                 : f.notesHistory || [];
               const finalStatusHistory = [...prevHistory, ...newEntries];
               onSave({ ...f, notes: "", notesHistory: nextNotesHistory, statusHistory: finalStatusHistory });
+              draft.clearDraft();
               markSeen?.(f.id, finalStatusHistory.length + nextNotesHistory.length);
               onClose();
             }}
@@ -2925,7 +2988,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
     if (!val) return [];
     return val.split(/[,/]/).map((s) => s.trim()).filter(Boolean);
   };
-  const [f, setF] = useState(
+  const [f, setF, draft] = useFormDraft("referral", item, () => (
     item
       ? {
           ...item,
@@ -2952,7 +3015,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
           notes: "",
           notesHistory: [],
         }
-  );
+  ));
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const [saveError, setSaveError] = useState("");
   useEffect(() => {
@@ -2967,7 +3030,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
   // get set once and revisited rarely, unlike Last contact/Next action/Notes below, which is what
   // actually gets touched on every check-in. A brand-new record has nothing to summarize yet, so
   // it starts fully expanded.
-  const [editingDetails, setEditingDetails] = useState(!item);
+  const [editingDetails, setEditingDetails] = useState(!item || draft.restored);
   const owner = partners.find((p) => p.id === f.responsiblePartner);
   const practiceFedTags = Array.isArray(f.practiceFed) ? f.practiceFed : (f.practiceFed ? [f.practiceFed] : []);
   return (
@@ -2978,6 +3041,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
+          <DraftBanner draft={draft} />
           {!editingDetails ? (
             <div className="record-summary">
               <div className="record-summary-top">
@@ -3089,7 +3153,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
         <div className="sheet-actions">
           {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {item && (
-            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); draft.clearDraft(); onClose(); }}>
               Delete
             </ConfirmButton>
           )}
@@ -3111,6 +3175,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
                 nextNotesHistory = [...nextNotesHistory, { text: noteText, date: todayISO(), partnerId: me }];
               }
               onSave({ ...f, notes: "", notesHistory: nextNotesHistory });
+              draft.clearDraft();
               markSeen?.(f.id, nextNotesHistory.length);
               onClose();
             }}
@@ -3124,7 +3189,7 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
 }
 
 function ClientModal({ item, partners, sectors, occupations, prospects, positions, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillName, onSave, onDelete, onLogNewWork, onClose, markSeen, getDayLoad }) {
-  const [f, setF] = useState(
+  const [f, setF, draft] = useFormDraft("client", item, () => (
     item
       ? {
           ...item,
@@ -3163,7 +3228,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           notes: "",
           notesHistory: [],
         }
-  );
+  ));
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const [saveError, setSaveError] = useState("");
   useEffect(() => {
@@ -3179,7 +3244,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
   // sector, responsible partner, what they instructed us on / probably need, contact details) into
   // a compact summary — Last contact/Next action/Notes stay live below, since that's what actually
   // gets touched on a check-in. New clients have nothing to summarize yet, so start expanded.
-  const [editingDetails, setEditingDetails] = useState(!item);
+  const [editingDetails, setEditingDetails] = useState(!item || draft.restored);
   // A retainer that's already configured collapses into a compact summary too — once set,
   // there's no reason three input fields should permanently occupy the form every time it's
   // opened. Starts expanded only for a client with no retainer configured yet (nothing to
@@ -3195,6 +3260,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
+          <DraftBanner draft={draft} />
           {voiceSupported && (
             voiceFillOpen ? (
               <VoiceFillPanel fields={CLIENT_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
@@ -3412,7 +3478,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
         <div className="sheet-actions">
           {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {item && (
-            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); draft.clearDraft(); onClose(); }}>
               Delete
             </ConfirmButton>
           )}
@@ -3434,6 +3500,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
                 nextNotesHistory = [...nextNotesHistory, { text: noteText, date: todayISO(), partnerId: me }];
               }
               onSave({ ...f, notes: "", notesHistory: nextNotesHistory });
+              draft.clearDraft();
               markSeen?.(f.id, nextNotesHistory.length);
               onClose();
             }}
@@ -3447,7 +3514,7 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
 }
 
 function TenderModal({ tender, partners, clients, prospects, nextActionSuggestions, permissions = ROLE_PERMISSIONS.partner, me, prefillTitle, onSave, onDelete, onAutoCreateClient, onAddAsWonProspect, onLogNewWork, onClose, markSeen, getDayLoad }) {
-  const [f, setF] = useState(
+  const [f, setF, draft] = useFormDraft("tender", tender, () => (
     tender
       ? {
           ...tender,
@@ -3486,7 +3553,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
           notesHistory: [],
           stageHistory: [],
         }
-  );
+  ));
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const [saveError, setSaveError] = useState("");
   const [showContact, setShowContact] = useState(Boolean(tender?.contactPhone || tender?.contactEmail));
@@ -3503,7 +3570,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
   // deadline, estimated value, responsible partner) into a compact summary — Stage/Next
   // action/scorecard/Result stay live below, since those are what actually move as a tender
   // progresses. New tenders have nothing to summarize yet, so start expanded.
-  const [editingDetails, setEditingDetails] = useState(!tender);
+  const [editingDetails, setEditingDetails] = useState(!tender || draft.restored);
   const owner = partners.find((p) => p.id === f.responsiblePartner);
   // Empanelment is an "award" workflow, not a sales pipeline — the real value never lives on this
   // record itself, it lives on whatever actual instructions come through afterward, tracked as
@@ -3559,6 +3626,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
           <button className="icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="sheet-body">
+          <DraftBanner draft={draft} />
           {voiceSupported && (
             voiceFillOpen ? (
               <VoiceFillPanel fields={TENDER_VOICE_FIELDS} f={f} setF={setF} onExit={() => setVoiceFillOpen(false)} />
@@ -3797,7 +3865,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
         <div className="sheet-actions">
           {saveError && <p className="save-error">⚠️ {saveError}</p>}
           {tender && (
-            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); onClose(); }}>
+            <ConfirmButton className="btn btn-ghost btn-danger" onConfirm={() => { onDelete(f.id); draft.clearDraft(); onClose(); }}>
               Delete
             </ConfirmButton>
           )}
@@ -3826,6 +3894,7 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
                 : f.notesHistory || [];
               const saved = { ...f, notes: "", notesHistory: nextNotesHistory, stageHistory: nextHistory };
               onSave(saved);
+              draft.clearDraft();
               markSeen?.(f.id, nextHistory.length + nextNotesHistory.length);
               // The client needs to be created right here, at the moment of saving — waiting on the
               // `tender` prop to reflect this on a later render doesn't work, because the modal
@@ -5030,6 +5099,43 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
     }
   }, [isDemo, store]);
 
+  // Remember which tab and which record form is open, on this device, so that when iOS Safari
+  // reloads the page after the person comes back from another app they land exactly where they
+  // were (the form's typed-in fields come back separately, via useFormDraft).
+  const screenRestoredRef = useRef(false);
+  useEffect(() => {
+    if (screenRestoredRef.current || !store.ready || !me) return;
+    screenRestoredRef.current = true;
+    const saved = deviceState.get("screen");
+    if (!saved) return;
+    if (saved.tab) setTab(saved.tab);
+    const o = saved.open;
+    if (!o) return;
+    const lists = { prospect: store.prospects, client: store.clients, referral: store.referrals, tender: store.tenders };
+    const openers = { prospect: setOpenProspect, client: setOpenClient, referral: setOpenReferral, tender: setOpenTender };
+    if (!openers[o.kind]) return;
+    if (o.id == null) {
+      openers[o.kind](null);
+    } else {
+      const rec = (lists[o.kind] || []).find((x) => x.id === o.id);
+      if (rec) openers[o.kind](rec);
+    }
+  }, [store.ready, me, store.prospects, store.clients, store.referrals, store.tenders]);
+  useEffect(() => {
+    if (!screenRestoredRef.current) return;
+    const openFor = (kind, value) => (value === undefined ? null : { kind, id: value?.id ?? null });
+    const open =
+      openFor("prospect", openProspect) || openFor("client", openClient) || openFor("referral", openReferral) || openFor("tender", openTender);
+    deviceState.set("screen", { tab, open });
+  }, [tab, openProspect, openClient, openReferral, openTender]);
+  // Signing out deliberately clears this device's drafts and remembered screen, so the next
+  // person to use a shared phone or laptop doesn't see half-typed client details.
+  const handleSignOut = () => {
+    deviceState.clearPrefix("draft:");
+    deviceState.remove("screen");
+    onSignOut();
+  };
+
   if (!store.ready) {
     return (
       <div className="boot">
@@ -5048,7 +5154,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
         <h1>Bideey</h1>
         <p className="muted">Opening your workspace…</p>
         <p className="fine">You are signed in. We are matching your account to your firm workspace.</p>
-        <button className="link-btn" onClick={onSignOut}>Sign out</button>
+        <button className="link-btn" onClick={handleSignOut}>Sign out</button>
       </div>
     );
   }
@@ -5134,7 +5240,7 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
           <span className="me-name">
             {myPartner?.name || "Switch"}
           </span>
-          <button className="signout-btn" onClick={onSignOut}>Sign out</button>
+          <button className="signout-btn" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
 
@@ -7450,6 +7556,7 @@ export function Style() {
       .search-clear{ position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--muted); font-size:13px; padding:4px; }
       .filter-row{ display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
       .filter-row select{ padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; font-family:inherit; font-size:13px; }
+      .draft-banner{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; background:#FFF7E6; border:1px solid var(--gold-2); color:var(--ink); border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13px; }
       .filter-row select.filter-active{ border-color:var(--ink, #111); font-weight:600; }
       @media (max-width:520px){ .filter-row select{ flex:1 1 calc(50% - 10px); min-width:0; max-width:100%; } }
       .overdue-banner{ background:#F7E3E3; color:var(--red); font-size:12px; font-weight:600; padding:5px 10px; border-radius:999px; }
