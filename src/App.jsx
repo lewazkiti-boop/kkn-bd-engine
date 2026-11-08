@@ -4820,7 +4820,15 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const setVvh = () => document.documentElement.style.setProperty("--vvh", `${vv.height}px`);
+    // Track the visible area's position (offsetTop), not just its height. When the keyboard or
+    // the copy/paste menu appears, iOS scrolls the visible area down the page; without the
+    // offset the modal stays pinned to the old top, gets drawn partly off-screen, and the page
+    // behind it shows through underneath.
+    const setVvh = () => {
+      const root = document.documentElement.style;
+      root.setProperty("--vvh", `${vv.height}px`);
+      root.setProperty("--vvt", `${Math.max(0, vv.offsetTop)}px`);
+    };
     setVvh();
     vv.addEventListener("resize", setVvh);
     vv.addEventListener("scroll", setVvh);
@@ -4836,6 +4844,42 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
       vv.removeEventListener("scroll", setVvh);
       window.removeEventListener("focusin", recheckSoon);
       window.removeEventListener("focusout", recheckSoon);
+    };
+  }, []);
+  // While any modal sheet is open, freeze the page behind it. Otherwise iOS Safari scrolls that
+  // background page (not the form) when the keyboard opens or you long-press to paste, which is
+  // what makes a form being filled in suddenly jump away. Watching for .overlay elements covers
+  // every modal in the app in one place; the scroll position is restored exactly on close.
+  useEffect(() => {
+    // The app's list scrolls inside #root (html, body and #root are all height:100%), not the
+    // window itself, so that's the element to freeze. The window is frozen too as a fallback.
+    const body = document.body;
+    let locked = null;
+    const lock = () => {
+      if (locked) return;
+      const root = document.getElementById("root");
+      locked = { root, rootY: root ? root.scrollTop : 0, winY: window.scrollY };
+      if (root) root.style.overflow = "hidden";
+      Object.assign(body.style, { position: "fixed", top: `-${locked.winY}px`, left: "0", right: "0", width: "100%", overflow: "hidden" });
+    };
+    const unlock = () => {
+      if (!locked) return;
+      const { root, rootY, winY } = locked;
+      locked = null;
+      Object.assign(body.style, { position: "", top: "", left: "", right: "", width: "", overflow: "" });
+      if (root) {
+        root.style.overflow = "";
+        root.scrollTop = rootY;
+      }
+      window.scrollTo(0, winY);
+    };
+    const sync = () => (document.querySelector(".overlay") ? lock() : unlock());
+    const observer = new MutationObserver(sync);
+    observer.observe(document.body, { childList: true, subtree: true });
+    sync();
+    return () => {
+      observer.disconnect();
+      unlock();
     };
   }, []);
   const [tab, setTab] = useState("pipeline");
@@ -7665,14 +7709,14 @@ export function Style() {
 
       .section-intro{ font-size:13px; color:var(--muted); margin:0 0 12px; }
 
-      .overlay{ position:fixed; top:0; left:0; right:0; height:var(--vvh, 100vh); background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
+      .overlay{ position:fixed; top:var(--vvt, 0px); left:0; right:0; height:var(--vvh, 100vh); overscroll-behavior:contain; background:rgba(11,20,32,0.5); display:flex; align-items:flex-end; z-index:20; overflow-x:hidden; }
       .sheet{ background:#fff; width:100%; max-width:560px; margin:0 auto; border-radius:14px 14px 0 0; max-height:min(92vh, calc(var(--vvh, 100vh) * 0.92)); display:flex; flex-direction:column; overflow-x:hidden; }
       .sheet-head{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:16px; border-bottom:1px solid var(--line); }
       .sheet-head h3{ min-width:0; flex:1 1 auto; overflow-wrap:break-word; }
       .icon-btn{ flex:0 0 auto; }
       .sheet-head h3{ font-family:'Playfair Display',serif; margin:0; font-size:18px; }
       .icon-btn{ background:none; border:none; font-size:16px; color:var(--muted); }
-      .sheet-body{ padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:12px; }
+      .sheet-body{ padding:14px 16px; overflow-y:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; display:flex; flex-direction:column; gap:12px; }
       .field{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--muted); font-weight:600; min-width:0; }
       .field input, .field select, .field textarea{ font-family:inherit; font-size:14px; color:var(--ink); padding:9px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; outline:none; width:100%; min-width:0; box-sizing:border-box; }
       .field select{ text-overflow:ellipsis; white-space:nowrap; overflow:hidden; }
