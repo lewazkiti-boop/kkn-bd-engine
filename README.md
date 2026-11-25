@@ -74,6 +74,18 @@ Users sign in with a Supabase magic link before they can see their firm's worksp
 
 The static marketing site lives in [`landing/`](./landing/). It is plain HTML, CSS, and JavaScript so it can be copied into cPanel hosting for `bideey.com` while the app itself continues to run separately at `app.bideey.com`.
 
+## Reminder alerts (push notifications)
+
+Next actions can carry an optional time. Each device can opt in from the Reminders tab and is alerted at 9:00 the day before, and 1 hour before anything with a time (times are read in that device's time zone). Overdue items and watchlist check-backs don't alert. Alerts show the record name and next action on the lock screen.
+
+One-time setup in Supabase:
+
+1. **SQL Editor:** run [`supabase/push-notifications.sql`](./supabase/push-notifications.sql).
+2. **Edge Functions:** create `send-reminders` with both files in [`supabase/functions/send-reminders/`](./supabase/functions/send-reminders/) and turn **Verify JWT off** (the function checks callers itself). With the CLI: `supabase functions deploy send-reminders --project-ref YOUR_PROJECT_REF`. Signing keys are generated automatically and stay in the database.
+3. **SQL Editor:** replace `YOUR_PROJECT_REF` in [`supabase/push-schedule.sql`](./supabase/push-schedule.sql) and run it.
+
+**iPhone/iPad:** open the app in Safari, Share → Add to Home Screen, open it from the new icon, sign in, then turn alerts on. The emailed sign-in link opens in Safari, so the Home Screen app needs the emailed **code**: add `{{ .Token }}` to the **Magic Link** email template (Authentication → Emails). Newer free-plan projects need custom SMTP to edit templates.
+
 ## How storage works
 
 The original artifact persisted data through `window.storage.get()` / `window.storage.set()`, an API that only exists inside Claude's artifact sandbox. `src/lib/storagePolyfill.js` re-implements that exact interface, so the rest of the app (`src/App.jsx`, unchanged from the artifact source) keeps working without modification — with one important distinction the artifact itself relies on:

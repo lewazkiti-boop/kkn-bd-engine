@@ -3,6 +3,8 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase } from "./lib/supabaseClient";
 import { deviceState } from "./lib/storagePolyfill";
+import NotificationSettings from "./NotificationSettings";
+import { disablePush } from "./lib/push";
 
 /* ------------------------------------------------------------------ *
  *  Bideey — shared BD pipeline for law-firm teams
@@ -302,6 +304,7 @@ const VAULT_ITEMS = [
 
 const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const dropOrphanTime = (r) => (!r.nextActionDate && r.nextActionTime ? { ...r, nextActionTime: "" } : r);
 
 // saveProspect (below, in useStorage) auto-creates a client the moment a prospect is saved as
 // Won — but that only fires for prospects that actually pass through that action. Anything that
@@ -641,6 +644,7 @@ const EXPORT_ENTITY_CONFIGS = {
       { key: "estimatedValue", label: "Estimated value" },
       { key: "nextAction", label: "Next action" },
       { key: "nextActionDate", label: "Next action date" },
+      { key: "nextActionTime", label: "Next action time" },
       { key: "notesHistory", label: "Notes", resolve: joinNotes },
     ],
   },
@@ -662,6 +666,7 @@ const EXPORT_ENTITY_CONFIGS = {
       { key: "lastContact", label: "Last contact" },
       { key: "nextAction", label: "Next action" },
       { key: "nextActionDate", label: "Next action date" },
+      { key: "nextActionTime", label: "Next action time" },
       { key: "notesHistory", label: "Notes", resolve: joinNotes },
     ],
   },
@@ -679,6 +684,7 @@ const EXPORT_ENTITY_CONFIGS = {
       { key: "lastContact", label: "Last contact" },
       { key: "nextAction", label: "Next action" },
       { key: "nextActionDate", label: "Next action date" },
+      { key: "nextActionTime", label: "Next action time" },
       { key: "notesHistory", label: "Notes", resolve: joinNotes },
     ],
   },
@@ -1230,7 +1236,8 @@ function useStorage(activeFirmId) {
         setPartners(next);
         persist("kkn-partners", next);
       },
-      saveProspect: (p) => {
+      saveProspect: (record) => {
+        const p = dropOrphanTime(record);
         const prev = prospects.find((x) => x.id === p.id);
         const exists = Boolean(prev);
         const next = exists
@@ -1289,7 +1296,8 @@ function useStorage(activeFirmId) {
         persist("kkn-prospects", nextProspects);
         persist("kkn-clients", nextClients);
       },
-      saveReferral: (r) => {
+      saveReferral: (record) => {
+        const r = dropOrphanTime(record);
         const exists = referrals.some((x) => x.id === r.id);
         // Stars are only ever changed through toggleReferralStar, so a form opened before
         // someone starred this record can't undo that star when it's saved.
@@ -1409,7 +1417,8 @@ function useStorage(activeFirmId) {
         setActivity(next);
         persist("kkn-activity", next);
       },
-      saveTender: (t) => {
+      saveTender: (record) => {
+        const t = dropOrphanTime(record);
         const exists = tenders.some((x) => x.id === t.id);
         const next = exists ? tenders.map((x) => (x.id === t.id ? t : x)) : [...tenders, { firmId: t.firmId || activeFirmId, ...t }];
         setTenders(next);
@@ -1425,7 +1434,8 @@ function useStorage(activeFirmId) {
         setVault(next);
         persist("kkn-tender-vault", next);
       },
-      saveClient: (c) => {
+      saveClient: (record) => {
+        const c = dropOrphanTime(record);
         const exists = clients.some((x) => x.id === c.id);
         // Stars are only ever changed through toggleClientStar (see saveReferral).
         const next = exists
@@ -1869,12 +1879,14 @@ function ReminderCard({ item, ownerName, kindLabel, onOpen, onMarkDone, onResche
   const diff = item.diff;
   const [rescheduling, setRescheduling] = useState(false);
   const [newDate, setNewDate] = useState(item.date);
+  const [newTime, setNewTime] = useState(item.time);
+  const timed = item.kind !== "retainer";
 
   return (
     <div className="card reminder-card" onClick={rescheduling ? undefined : onOpen}>
       <div className="card-top">
         <span className="org">{item.title || "Untitled"}</span>
-        <span className="fee">{item.date}</span>
+        <span className="fee">{item.date}{item.time ? ` · ${item.time}` : ""}</span>
       </div>
       {item.action && <p className="reminder-action">{item.action}</p>}
       <div className="card-meta">
@@ -1893,7 +1905,7 @@ function ReminderCard({ item, ownerName, kindLabel, onOpen, onMarkDone, onResche
           </button>
           <button
             className="chip-btn chip-ghost reminder-done"
-            onClick={(e) => { e.stopPropagation(); setNewDate(item.date); setRescheduling(true); }}
+            onClick={(e) => { e.stopPropagation(); setNewDate(item.date); setNewTime(item.time); setRescheduling(true); }}
           >
             ↻ Reschedule
           </button>
@@ -1901,10 +1913,11 @@ function ReminderCard({ item, ownerName, kindLabel, onOpen, onMarkDone, onResche
       )}
       {rescheduling && (
         <div className="reschedule-row" onClick={(e) => e.stopPropagation()}>
-          <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+          <input type="date" aria-label="New date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
+          {timed && <input type="time" aria-label="New time (optional)" value={newTime} onChange={(e) => setNewTime(e.target.value)} />}
           <button
             className="chip-btn"
-            onClick={() => { onReschedule(newDate); setRescheduling(false); }}
+            onClick={() => { onReschedule(newDate, newTime); setRescheduling(false); }}
           >
             Save
           </button>
@@ -1920,15 +1933,15 @@ function collectReminders(store) {
   const items = [];
   store.prospects.forEach((p) => {
     if (p.nextActionDate && !["won", "lost"].includes(p.status)) {
-      items.push({ kind: "prospect", id: p.id, title: p.organization, action: p.nextAction, date: p.nextActionDate, ownerId: p.responsiblePartner, ref: p });
+      items.push({ kind: "prospect", id: p.id, title: p.organization, action: p.nextAction, date: p.nextActionDate, time: p.nextActionTime || "", ownerId: p.responsiblePartner, ref: p });
     }
   });
   store.clients.forEach((c) => {
     if (c.nextActionDate) {
-      items.push({ kind: "client", id: c.id, title: c.name, action: c.nextAction, date: c.nextActionDate, ownerId: c.responsiblePartner, ref: c });
+      items.push({ kind: "client", id: c.id, title: c.name, action: c.nextAction, date: c.nextActionDate, time: c.nextActionTime || "", ownerId: c.responsiblePartner, ref: c });
     }
     if (c.hasRetainer && c.retainerRenewalDate) {
-      items.push({ kind: "retainer", id: c.id, title: c.name, action: `Renew retainer (${c.retainerFrequency || "recurring"})`, date: c.retainerRenewalDate, ownerId: c.responsiblePartner, ref: c });
+      items.push({ kind: "retainer", id: c.id, title: c.name, action: `Renew retainer (${c.retainerFrequency || "recurring"})`, date: c.retainerRenewalDate, time: "", ownerId: c.responsiblePartner, ref: c });
     }
   });
   store.tenders.forEach((t) => {
@@ -1938,12 +1951,12 @@ function collectReminders(store) {
     // stage. A lost or withdrawn empanelment application has truly concluded, same as a lost tender.
     const stillNeedsReminders = t.stage !== "result" || (t.kind === "empanelment" && t.outcome === "Won");
     if (t.nextActionDate && stillNeedsReminders) {
-      items.push({ kind: "tender", id: t.id, title: t.title, action: t.nextAction, date: t.nextActionDate, ownerId: t.responsiblePartner, ref: t });
+      items.push({ kind: "tender", id: t.id, title: t.title, action: t.nextAction, date: t.nextActionDate, time: t.nextActionTime || "", ownerId: t.responsiblePartner, ref: t });
     }
   });
   store.referrals.forEach((r) => {
     if (r.nextActionDate) {
-      items.push({ kind: "referral", id: r.id, title: referralDisplayName(r), action: r.nextAction, date: r.nextActionDate, ownerId: r.responsiblePartner || null, ref: r });
+      items.push({ kind: "referral", id: r.id, title: referralDisplayName(r), action: r.nextAction, date: r.nextActionDate, time: r.nextActionTime || "", ownerId: r.responsiblePartner || null, ref: r });
     }
   });
   return items;
@@ -2860,10 +2873,15 @@ function ProspectModal({ prospect, partners, referrals, clients, prospects, tend
             <Field label="Last contact">
               <input type="date" value={f.lastContact} onChange={set("lastContact")} />
             </Field>
-            <Field label="Next action date">
-              <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
-              <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
-            </Field>
+            <div className="date-time-col">
+              <Field label="Next action date">
+                <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
+              </Field>
+              <Field label="Time (optional)">
+                <input type="time" value={f.nextActionTime || ""} onChange={set("nextActionTime")} disabled={!f.nextActionDate} />
+              </Field>
+            </div>
           </div>
           <VoiceField
             label="Next action"
@@ -3171,10 +3189,15 @@ function ReferralModal({ item, prefillName, partners, practices, referralTypes, 
             <Field label="Last contact">
               <input type="date" value={f.lastContact} onChange={set("lastContact")} />
             </Field>
-            <Field label="Next action date">
-              <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
-              <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
-            </Field>
+            <div className="date-time-col">
+              <Field label="Next action date">
+                <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
+              </Field>
+              <Field label="Time (optional)">
+                <input type="time" value={f.nextActionTime || ""} onChange={set("nextActionTime")} disabled={!f.nextActionDate} />
+              </Field>
+            </div>
           </div>
           <VoiceField
             label="Next action"
@@ -3496,10 +3519,15 @@ function ClientModal({ item, partners, sectors, occupations, prospects, position
             <input type="date" value={f.lastContact} onChange={set("lastContact")} />
           </Field>
           <div className="row-date-action">
-            <Field label="Next action date">
-              <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
-              <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
-            </Field>
+            <div className="date-time-col">
+              <Field label="Next action date">
+                <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
+              </Field>
+              <Field label="Time (optional)">
+                <input type="time" value={f.nextActionTime || ""} onChange={set("nextActionTime")} disabled={!f.nextActionDate} />
+              </Field>
+            </div>
             <VoiceField
               label="Next action"
               value={f.nextAction}
@@ -3850,10 +3878,15 @@ function TenderModal({ tender, partners, clients, prospects, nextActionSuggestio
             </>
           )}
           <div className="row-date-action">
-            <Field label="Next action date">
-              <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
-              <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
-            </Field>
+            <div className="date-time-col">
+              <Field label="Next action date">
+                <input type="date" value={f.nextActionDate} onChange={set("nextActionDate")} />
+                <DayLoadNote getDayLoad={getDayLoad} date={f.nextActionDate} excludeId={f.id} />
+              </Field>
+              <Field label="Time (optional)">
+                <input type="time" value={f.nextActionTime || ""} onChange={set("nextActionTime")} disabled={!f.nextActionDate} />
+              </Field>
+            </div>
             <VoiceField
               label="Next action"
               value={f.nextAction}
@@ -5217,9 +5250,11 @@ export default function App({ session, activeFirm, membershipRole, onSignOut, is
   }, [tab, openProspect, openClient, openReferral, openTender]);
   // Signing out deliberately clears this device's drafts and remembered screen, so the next
   // person to use a shared phone or laptop doesn't see half-typed client details.
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     deviceState.clearPrefix("draft:");
     deviceState.remove("screen");
+    // Stop alerts on this device first (while still signed in); never let that block signing out.
+    await Promise.race([disablePush().catch(() => {}), new Promise((resolve) => setTimeout(resolve, 2500))]);
     onSignOut();
   };
 
@@ -6030,7 +6065,7 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
   const withDiff = collectReminders(store)
     .filter((item) => filterPartner === "all" || item.ownerId === filterPartner)
     .map((item) => ({ ...item, diff: daysBetween(item.date, todayISO()) }))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+    .sort((a, b) => `${a.date} ${a.time || "99:99"}`.localeCompare(`${b.date} ${b.time || "99:99"}`));
 
   const visibleRows = dayFilter ? withDiff.filter((x) => x.date === dayFilter) : withDiff;
   const overdue = visibleRows.filter((x) => x.diff > 0);
@@ -6070,13 +6105,13 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
     }
   };
 
-  const reschedule = (item, newDate) => {
+  const reschedule = (item, newDate, newTime) => {
     if (!newDate) return;
     if (item.kind === "retainer") {
       store.saveClient({ ...item.ref, retainerRenewalDate: newDate });
       return;
     }
-    const updated = { ...item.ref, nextActionDate: newDate };
+    const updated = { ...item.ref, nextActionDate: newDate, nextActionTime: newTime || "" };
     if (item.kind === "prospect") store.saveProspect(updated);
     else if (item.kind === "tender") store.saveTender(updated);
     else if (item.kind === "client") store.saveClient(updated);
@@ -6101,7 +6136,7 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
                 kindLabel={KIND_LABEL[item.kind]}
                 onOpen={() => openFor(item)}
                 onMarkDone={() => markDone(item)}
-                onReschedule={(newDate) => reschedule(item, newDate)}
+                onReschedule={(newDate, newTime) => reschedule(item, newDate, newTime)}
               />
             );
           })}
@@ -6124,6 +6159,7 @@ function Reminders({ store, me, permissions = ROLE_PERMISSIONS.partner, setOpenP
           </select>
         )}
       </div>
+      <NotificationSettings me={me} />
       <button type="button" className="voice-fill-trigger" onClick={() => setCalendarOpen((o) => !o)}>
         {calendarOpen ? "− Hide calendar" : "📅 View calendar"}
       </button>
@@ -7702,8 +7738,15 @@ export function Style() {
       .reminder-action{ font-size:13px; margin:0; color:var(--ink); }
       .reminder-done{ align-self:flex-start; margin-top:2px; }
       .reminder-actions{ display:flex; gap:8px; margin-top:2px; }
-      .reschedule-row{ display:flex; gap:8px; align-items:center; margin-top:6px; }
-      .reschedule-row input{ flex:1; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; }
+      .reschedule-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:6px; }
+      .date-time-col{ display:flex; flex-direction:column; gap:10px; min-width:0; }
+      .date-time-col input{ width:100%; min-width:0; }
+      .date-time-col input:disabled{ opacity:.5; }
+      .push-panel{ display:flex; flex-direction:column; gap:8px; margin-bottom:10px; padding:12px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:13px; }
+      .push-panel p{ margin:0; }
+      .push-row{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+      .push-row select{ flex:1; min-width:140px; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; }
+      .reschedule-row input{ flex:1 1 140px; min-width:0; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font-family:inherit; font-size:13px; background:#fff; }
 
       .fab{ position:fixed; bottom:20px; left:50%; transform:translateX(-50%); max-width:520px; width:calc(100% - 28px); background:var(--navy); color:#fff; border:none; padding:14px; border-radius:10px; font-weight:700; font-size:14px; box-shadow:0 8px 20px rgba(11,42,74,0.35); }
 
