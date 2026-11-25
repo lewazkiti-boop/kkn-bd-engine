@@ -56,7 +56,9 @@ as $$
 declare
   member_firm text;
 begin
-  select firm_id into member_firm from firm_members where user_id = auth.uid();
+  -- to_jsonb keeps this working whether or not firm_members has an "active" column.
+  select fm.firm_id into member_firm from firm_members fm
+  where fm.user_id = auth.uid() and (to_jsonb(fm) ->> 'active') is distinct from 'false';
   if member_firm is null then
     raise exception 'You must belong to a firm to receive alerts.';
   end if;

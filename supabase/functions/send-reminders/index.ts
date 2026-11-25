@@ -62,12 +62,12 @@ async function deliver(sub: any, cfg: any, message: { title: string; body: strin
 
 async function run(cfg: any) {
   const subs = must(await db.from("push_subscriptions").select("*")) as any[];
-  const members = subs.length ? (must(await db.from("firm_members").select("firm_id, user_id")) as any[]) : [];
+  const members = subs.length ? (must(await db.from("firm_members").select("*")) as any[]) : [];
   const firms = new Map<string, Record<string, any>>();
   let sent = 0;
   for (const sub of subs) {
     // Someone removed from the firm must stop receiving its client names.
-    if (!members.some((m) => m.user_id === sub.user_id && m.firm_id === sub.firm_id)) continue;
+    if (!members.some((m) => m.user_id === sub.user_id && m.firm_id === sub.firm_id && m.active !== false)) continue;
     try {
       if (!firms.has(sub.firm_id)) {
         const rows = must(await db.from("firm_kv").select("key, value").eq("firm_id", sub.firm_id)
@@ -109,8 +109,8 @@ Deno.serve(async (req: Request) => {
     const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
     const { data: auth } = await db.auth.getUser(token);
     if (!auth?.user) return reply({ error: "Sign in first" }, 401);
-    const member = must(await db.from("firm_members").select("firm_id").eq("user_id", auth.user.id).maybeSingle());
-    if (!member) return reply({ error: "Not a firm member" }, 403);
+    const member = must(await db.from("firm_members").select("*").eq("user_id", auth.user.id).maybeSingle()) as any;
+    if (!member || member.active === false) return reply({ error: "Not a firm member" }, 403);
 
     if (action === "public-key") return reply({ publicKey: cfg.vapid_public });
     if (action === "test") {
