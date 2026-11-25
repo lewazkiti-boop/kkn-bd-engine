@@ -13,6 +13,19 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState("idle"); // idle | sending | sent | error
   const [error, setError] = useState("");
+  const [code, setCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
+
+  // An iPhone Home Screen app can't receive the emailed link (it opens in Safari), so a code
+  // from the same email signs in right here. AuthGate reacts to the new session.
+  const verify = async (e) => {
+    e.preventDefault();
+    setVerifying(true);
+    setError("");
+    const { error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
+    setVerifying(false);
+    if (err) setError(err.message || "That code didn't work. Request a new email and try again.");
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -42,7 +55,22 @@ export default function Login() {
           <p className="fine" style={{ marginTop: 4 }}>
             We sent a sign-in link to <strong>{email.trim()}</strong>. Open it on this device to get in — the link expires after a short while.
           </p>
-          <button className="link-btn" onClick={() => setStatus("idle")}>Use a different email</button>
+          <form className="add-partner" onSubmit={verify} style={{ marginTop: 8 }}>
+            <input
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="Code from the email, if shown"
+              aria-label="Sign-in code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+              required
+            />
+            <button className="btn btn-primary" type="submit" disabled={verifying}>
+              {verifying ? "Checking…" : "Sign in with code"}
+            </button>
+          </form>
+          {error && <p className="voice-error">{error}</p>}
+          <button className="link-btn" onClick={() => { setStatus("idle"); setCode(""); setError(""); }}>Use a different email</button>
         </>
       ) : (
         <>
